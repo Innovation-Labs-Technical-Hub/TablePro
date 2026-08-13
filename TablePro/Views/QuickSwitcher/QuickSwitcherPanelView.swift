@@ -66,6 +66,9 @@ struct QuickSwitcherPanelView: View {
                 openTableNames: openTableNames
             )
         }
+        .task(id: viewModel.crossConnectionLoadVersion) {
+            await viewModel.loadCrossConnectionItems()
+        }
     }
 }
 
@@ -96,7 +99,7 @@ struct QuickSwitcherPanelContent: View {
     }
 
     private var showsResultSurface: Bool {
-        !viewModel.flatItems.isEmpty || !trimmedQuery.isEmpty
+        !viewModel.flatItems.isEmpty || !trimmedQuery.isEmpty || viewModel.isLoadingResults
     }
 
     private var trimmedQuery: String {
@@ -160,6 +163,7 @@ struct QuickSwitcherPanelContent: View {
         }
         .buttonStyle(.plain)
         .help(scope.title)
+        .accessibilityIdentifier("quick-switcher-scope-\(scope.rawValue)")
     }
 
     private var barStrokeColor: Color {
@@ -322,17 +326,26 @@ struct QuickSwitcherPanelContent: View {
                 .background(Capsule().fill(Color(nsColor: .quaternarySystemFill)))
         }
 
-        if isSelected {
-            Text(commitHint(for: item))
-                .font(.system(size: 12))
-                .foregroundStyle(secondaryColor)
-            keycap("↩", isEmphasized: isEmphasized)
-        } else if !item.subtitle.isEmpty {
+        if showsSubtitle(for: item, isSelected: isSelected) {
             Text(item.subtitle)
                 .font(.system(size: 12))
                 .foregroundStyle(secondaryColor)
                 .lineLimit(1)
         }
+
+        if isSelected {
+            Text(commitHint(for: item))
+                .font(.system(size: 12))
+                .foregroundStyle(secondaryColor)
+            keycap("↩", isEmphasized: isEmphasized)
+        }
+    }
+
+    /// A cross-connection result keeps its path while selected, because it names the connection
+    /// the commit is about to open and nothing else on the row carries that.
+    private func showsSubtitle(for item: QuickSwitcherItem, isSelected: Bool) -> Bool {
+        guard !item.subtitle.isEmpty else { return false }
+        return !isSelected || item.objectTarget != nil
     }
 
     private func keycap(_ label: String, isEmphasized: Bool) -> some View {
@@ -357,13 +370,27 @@ struct QuickSwitcherPanelContent: View {
         }
     }
 
+    @ViewBuilder
     private var noResultsRow: some View {
-        Text(String(format: String(localized: "No results for \"%@\""), viewModel.searchText))
+        if viewModel.isLoadingResults {
+            HStack(spacing: 10) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Loading...")
+            }
             .font(.system(size: 15))
             .foregroundStyle(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 24)
             .frame(height: PanelMetrics.rowHeight + PanelMetrics.listVerticalPadding * 2)
+        } else {
+            Text(String(format: String(localized: "No results for \"%@\""), viewModel.searchText))
+                .font(.system(size: 15))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 24)
+                .frame(height: PanelMetrics.rowHeight + PanelMetrics.listVerticalPadding * 2)
+        }
     }
 
     @ViewBuilder
@@ -377,9 +404,11 @@ struct QuickSwitcherPanelContent: View {
                 viewModel.selectedItemId = item.id
                 onCommit(item, .openInNewWindowTab)
             }
-            Button(String(localized: "Open Structure")) {
-                viewModel.selectedItemId = item.id
-                onCommit(item, .openStructure)
+            if viewModel.canOpenStructure(item) {
+                Button(String(localized: "Open Structure")) {
+                    viewModel.selectedItemId = item.id
+                    onCommit(item, .openStructure)
+                }
             }
         }
         Divider()
@@ -449,11 +478,14 @@ struct QuickSwitcherPanelContent: View {
     }
 
     private func openSelectedItem() {
-        guard let item = viewModel.selectedItem() else { return }
         let intent: QuickSwitcherCommitIntent = NSEvent.modifierFlags.contains(.option)
             ? .openInNewWindowTab
             : .open
-        onCommit(item, intent)
+        Task { @MainActor in
+            await viewModel.flushPendingFilter()
+            guard let item = viewModel.selectedItem() else { return }
+            onCommit(item, intent)
+        }
     }
 }
 

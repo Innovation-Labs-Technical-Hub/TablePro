@@ -31,10 +31,17 @@ extension MainContentCoordinator {
     }
 
     func handleQuickSwitcherSelection(_ item: QuickSwitcherItem, intent: QuickSwitcherCommitIntent = .open) {
+        if let target = item.objectTarget, target.connectionId != connectionId {
+            openQuickSwitcherObject(item, target: target, intent: intent)
+            return
+        }
+
+        let schemaName = item.objectTarget?.schemaName
         switch item.kind {
         case .table, .systemTable:
             openTableTab(
                 item.name,
+                schema: schemaName,
                 showStructure: intent == .openStructure,
                 isView: item.isReadOnly,
                 activateGridFocus: true,
@@ -44,6 +51,7 @@ extension MainContentCoordinator {
         case .view:
             openTableTab(
                 item.name,
+                schema: schemaName,
                 showStructure: intent == .openStructure,
                 isView: true,
                 activateGridFocus: true,
@@ -65,6 +73,66 @@ extension MainContentCoordinator {
 
         case .queryHistory:
             loadQueryIntoEditor(item.payload ?? item.name)
+        }
+    }
+
+    private func openQuickSwitcherObject(
+        _ item: QuickSwitcherItem,
+        target: QuickSwitcherObjectTarget,
+        intent: QuickSwitcherCommitIntent
+    ) {
+        if let coordinator = Self.coordinator(browsing: target) {
+            let disposition = coordinator.openTableTab(
+                item.name,
+                schema: target.schemaName,
+                isView: item.kind == .view || item.isReadOnly,
+                activateGridFocus: true,
+                forceNewWindowTab: intent == .openInNewWindowTab
+            )
+            switch disposition {
+            case .currentCoordinator:
+                if let tabId = coordinator.tabManager.selectedTabId {
+                    coordinator.selectTabAndFocusWindow(tabId)
+                }
+            case .focusedElsewhere:
+                break
+            case nil:
+                coordinator.focusWindow()
+            }
+            return
+        }
+
+        Task { [weak self] in
+            do {
+                try await TabRouter.shared.route(.openTable(
+                    connectionId: target.connectionId,
+                    database: target.databaseName,
+                    schema: target.schemaName,
+                    table: item.name,
+                    isView: item.kind == .view || item.isReadOnly
+                ))
+            } catch {
+                guard let self else { return }
+                AlertHelper.showErrorSheet(
+                    title: String(localized: "Could Not Open Table"),
+                    message: error.localizedDescription,
+                    window: contentWindow
+                )
+            }
+        }
+    }
+
+    /// A window already on the target database can open any of its schemas directly, because
+    /// `openTableTab` carries the schema per tab. Matching on the browsed schema too would send
+    /// most results down the router instead, which reconnects the connection and retargets that
+    /// window's sidebar as a side effect of opening one table.
+    private static func coordinator(browsing target: QuickSwitcherObjectTarget) -> MainContentCoordinator? {
+        allActiveCoordinators().first { coordinator in
+            guard coordinator.connectionId == target.connectionId,
+                  let session = coordinator.services.databaseManager.session(for: target.connectionId),
+                  session.isConnected else { return false }
+            guard let databaseName = target.databaseName else { return true }
+            return coordinator.browseDatabaseName == databaseName
         }
     }
 }

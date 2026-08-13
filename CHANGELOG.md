@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Select several databases or schemas in the sidebar tree and act on them at once: drop, refresh, copy names, or export. Shift-click and Cmd-click extend the selection.
 - The database switcher takes a multiple selection too, with the same actions on the right-click menu.
 - Drop Schema for PostgreSQL, SQL Server and SurrealDB.
+- Quick Switcher can search tables and views across every open connection.
 - SSL settings on mobile for MySQL, PostgreSQL and Redis: a mode picker plus CA, client certificate and client key. Import a PEM file, paste one, or use a PKCS#12 file. (#2083)
 - Legacy UUID Encoding on a MongoDB connection, so binary UUIDs written by the Java, C# or Python drivers read as UUIDs instead of hex. Filters, edits and MQL exports write the same bytes back. (#2086)
 
@@ -47,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Option+Return in the Quick Switcher opens the selected table in a new window tab. The shortcut was documented but never fired.
 - Right-clicking a table that is not part of the current selection now acts on that table. It used to act on the selected tables instead, including for Delete.
 - Database icons and the current-database checkmark stay visible on a selected row in the database switcher. They were drawn in the accent colour, which vanished against the accent-coloured selection.
 - The sidebar drops a database from the tree as soon as you drop it on the server, instead of listing it until you reconnect.
