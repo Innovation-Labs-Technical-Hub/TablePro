@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The database switcher takes a multiple selection too, with the same actions on the right-click menu.
 - Drop Schema for PostgreSQL, SQL Server and SurrealDB.
 - Quick Switcher can search tables and views across every open connection.
+- Quick Switcher can search saved queries and recent queries across every open connection.
 - SSL settings on mobile for MySQL, PostgreSQL and Redis: a mode picker plus CA, client certificate and client key. Import a PEM file, paste one, or use a PKCS#12 file. (#2083)
 - The editor underlines a structural mistake as you type: a closing bracket with no opener, or an unterminated comment. On MongoDB it also reports what the query parser rejects, such as an unknown collection method. A half-written statement is never flagged. (#2095)
 - PostgreSQL enum values are suggested when you compare against an enum column, so `WHERE status = ` offers the labels the type declares. (#2095)
