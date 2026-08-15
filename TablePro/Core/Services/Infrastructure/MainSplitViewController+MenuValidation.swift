@@ -92,7 +92,7 @@ extension MainSplitViewController: NSMenuItemValidation {
         /// ours to enable and disable now.
         case #selector(newEditorTab(_:)):
             return context.isConnected
-        case #selector(closeEditorTab(_:)):
+        case #selector(closeEditorTab(_:)), #selector(closeConnection(_:)):
             return context.hasSelectedWorkspace
         case #selector(selectNextEditorTab(_:)), #selector(selectPreviousEditorTab(_:)):
             return context.isConnected
@@ -242,7 +242,7 @@ extension MainSplitViewController: NSMenuItemValidation {
         case #selector(toggleInspector(_:)):
             setTitle(isInspectorVisible ? "Hide Inspector" : "Show Inspector", on: menuItem)
         case #selector(toggleWorkspaceRail(_:)):
-            setTitle(isWorkspaceRailEnabled ? "Hide Workspace Rail" : "Show Workspace Rail", on: menuItem)
+            setTitle(isWorkspaceRailEnabled ? "Hide Connections" : "Show Connections", on: menuItem)
         case #selector(undo(_:)):
             setResolvedTitle(commandActions?.resolvedUndoTitle ?? String(localized: "Undo"), on: menuItem)
         case #selector(redo(_:)):
