@@ -144,10 +144,7 @@ internal actor TabDiskActor {
     // MARK: - Static Path Helpers
 
     nonisolated private static func resolvedTabStateDirectory() -> URL {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first ?? FileManager.default.temporaryDirectory
+        let appSupport = AppStorageEnvironment.shared.applicationSupportRoot
         let baseDirectory = appSupport.appendingPathComponent("TablePro", isDirectory: true)
         return baseDirectory.appendingPathComponent("TabState", isDirectory: true)
     }
@@ -211,7 +208,7 @@ internal actor TabDiskActor {
     // MARK: - Migration from UserDefaults
 
     private static func performMigrationIfNeeded(tabStateDirectory: URL) {
-        let defaults = UserDefaults.standard
+        let defaults = AppStorageEnvironment.shared.defaults
 
         guard !defaults.bool(forKey: migrationCompleteKey) else { return }
 
