@@ -85,10 +85,16 @@ extension QueryExecutionCoordinator {
     ) {
         guard let idx = parent.tabManager.tabs.firstIndex(where: { $0.id == tabId }) else { return }
 
-        if let planText = ExplainResultRouter.planText(sql: sql, columns: columns, rows: rows) {
+        if let routed = ExplainResultRouter.route(
+            sql: sql,
+            columns: columns,
+            rows: rows,
+            databaseType: conn.type,
+            declaredVariants: conn.type.explainVariants
+        ) {
             applyExplainResult(
                 tabId: tabId,
-                planText: planText,
+                routed: routed,
                 executionTime: executionTime,
                 rowCount: rows.count,
                 sql: sql,
@@ -231,23 +237,24 @@ extension QueryExecutionCoordinator {
 
     private func applyExplainResult(
         tabId: UUID,
-        planText: String,
+        routed: ExplainResultRouter.RoutedPlan,
         executionTime: TimeInterval,
         rowCount: Int,
         sql: String,
         connection conn: DatabaseConnection,
         queryParameterValues: [QueryParameter]?
     ) {
-        let plan = QueryPlanParserFactory.parser(for: conn.type)?.parse(rawText: planText)
-
         parent.tabManager.mutate(tabId: tabId) { tab in
             tab.execution.executionTime = executionTime
             tab.execution.rowsAffected = 0
             tab.execution.statusMessage = nil
             tab.execution.lastExecutedAt = Date()
-            tab.display.explainText = planText
-            tab.display.explainPlan = plan
-            tab.display.explainExecutionTime = executionTime
+            tab.pagination.resetLoadMore()
+            tab.display.replaceUnpinnedResults(
+                with: [ExplainResultSetFactory.make(
+                    rawText: routed.rawText, plan: routed.plan, sql: sql, executionTime: executionTime
+                )]
+            )
             if tab.display.isResultsCollapsed {
                 tab.display.isResultsCollapsed = false
             }

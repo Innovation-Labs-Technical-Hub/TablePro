@@ -376,16 +376,7 @@ struct MainEditorContentView: View {
                             coordinator.commandActions?.closeTab()
                         },
                         onExecuteQuery: { coordinator.runQuery() },
-                        onExplain: { variant in
-                            if let variant {
-                                coordinator.runClickHouseExplain(variant: variant)
-                            } else {
-                                coordinator.runExplainQuery()
-                            }
-                        },
-                        onExplainVariant: { variant in
-                            coordinator.runVariantExplain(variant)
-                        },
+                        onExplain: { variant in coordinator.runExplain(variant: variant) },
                         onAIExplain: { text in
                             coordinator.showAIChatPanel()
                             coordinator.aiViewModel?.handleExplainSelection(text)
@@ -564,12 +555,16 @@ struct MainEditorContentView: View {
                 )
                 .id(tab.id)
             case .data:
-                if let explainText = tab.display.explainText {
-                    ExplainResultView(text: explainText, executionTime: tab.display.explainExecutionTime, plan: tab.display.explainPlan)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    resultTabBarSection(tab: tab)
+                resultTabBarSection(tab: tab)
 
+                if let explain = tab.display.activeExplainResult {
+                    QueryPlanResultView(
+                        rawText: explain.explainRawText ?? "",
+                        executionTime: explain.executionTime,
+                        plan: explain.queryPlan
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
                     let resolvedRows = resolvedTableRows(for: tab)
                     if let rs = tab.display.activeResultSet, rs.resultColumns.isEmpty,
                        rs.errorMessage == nil, tab.execution.lastExecutedAt != nil,
@@ -622,7 +617,7 @@ struct MainEditorContentView: View {
                 }
             }
 
-            if tab.display.explainText == nil {
+            if tab.display.activeExplainResult == nil {
                 Divider()
                 statusBar(tab: tab)
             }
