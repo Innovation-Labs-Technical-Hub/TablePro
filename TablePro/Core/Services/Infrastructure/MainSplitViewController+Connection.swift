@@ -42,8 +42,8 @@ internal extension MainSplitViewController {
     }
 
     @objc func retryConnection() {
-        guard let connection = payloadConnection else { return }
-        connect(connection, cancellingPrevious: true)
+        guard let connectionId = workspaces.selectedConnectionId else { return }
+        reconnectWorkspace(connectionId)
     }
 
     /// Reconnects the connection named, not whichever one the window happens to be showing.
@@ -78,25 +78,25 @@ internal extension MainSplitViewController {
         payloadConnection != nil && ConnectionWindowPhaseMachine.allowsManualConnect(phase: phase)
     }
 
-    func cancelConnectionAttempt() {
-        guard let workspace = workspaces.selected else { return }
+    func cancelConnectionAttempt(for connectionId: UUID) {
+        guard let workspace = workspaces.workspace(for: connectionId) else { return }
         workspace.attemptToken = nil
-        transition(to: .unavailable(.cancelled), for: workspace.connectionId)
-        DatabaseManager.shared.invalidateConnectionAttempt(workspace.connectionId)
-        Task { await DatabaseManager.shared.cancelEnsureConnected(workspace.connectionId) }
+        transition(to: .unavailable(.cancelled), for: connectionId)
+        DatabaseManager.shared.invalidateConnectionAttempt(connectionId)
+        Task { await DatabaseManager.shared.cancelEnsureConnected(connectionId) }
     }
 
     func openConnectionList() {
         WindowOpener.shared.openWelcome()
     }
 
-    func performUnavailablePrimaryAction(_ reason: ConnectionUnavailableReason) {
+    func performUnavailablePrimaryAction(_ reason: ConnectionUnavailableReason, for connectionId: UUID) {
         switch reason {
         case .pluginMissing:
-            guard let connection = payloadConnection else { return }
+            guard let connection = workspaces.workspace(for: connectionId)?.connection else { return }
             WelcomeRouter.shared.routePluginInstall(connection)
         case .notConnected, .cancelled, .disconnected, .disconnectedByUser, .failed:
-            retryConnection()
+            reconnectWorkspace(connectionId)
         }
     }
 

@@ -262,6 +262,19 @@ internal final class WorkspaceRailViewController: NSViewController {
         commit(row: tableView.selectedRow)
     }
 
+    /// Close means the connection highlighted here while the strip holds the keyboard.
+    ///
+    /// The selector is the window's, deliberately: a close command reaching the responder chain
+    /// finds this implementation before `MainSplitViewController`'s whenever the strip is focused,
+    /// which is the same mechanism that gives Cut and Copy a different meaning in each view. The
+    /// window used to ask whether the strip had focus and branch on the answer, which is this rule
+    /// written out by hand.
+    @objc
+    internal func closeEditorTab(_ sender: Any?) {
+        guard let workspace = appliedSelection else { return }
+        close(connectionId: workspace.connectionId)
+    }
+
     private func commit(row: Int) {
         guard entries.indices.contains(row) else { return }
         let workspace = entries[row].workspace
@@ -293,11 +306,6 @@ internal final class WorkspaceRailViewController: NSViewController {
     /// window leaves it where it was, because this window did not move. The rail needed a rule for
     /// when to put its highlight back only while it was guessing at the answer.
     private func activate(_ workspace: WorkspaceID) {
-        WorkspaceSwitchTrace.recordActivation(
-            connectionId: workspace.connectionId,
-            isHostedByThisWindow: host?.hostedConnectionIds.contains(workspace.connectionId) ?? false
-        )
-
         /// One window hosts every connection, so switching is a selection change in that
         /// window's own registry. Raising a different window is what made the rail read as a
         /// window switcher rather than a workspace switcher.
@@ -453,6 +461,17 @@ internal final class WorkspaceRailViewController: NSViewController {
                 presentingWindow: presentingWindow
             )
         }
+    }
+}
+
+// MARK: - NSMenuItemValidation
+
+extension WorkspaceRailViewController: NSMenuItemValidation {
+    /// A responder that claims an action also owns whether it applies. Without this AppKit enables
+    /// the item on the strip's behalf even when no row is highlighted.
+    internal func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard menuItem.action == #selector(closeEditorTab(_:)) else { return true }
+        return appliedSelection != nil
     }
 }
 
