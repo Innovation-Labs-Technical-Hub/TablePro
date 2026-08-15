@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.65.0] - 2026-08-16
+
 ### Added
 
 - Query History is a resizable drawer that opens per connection and remembers its height, its filters and whether it was open. Entries group by day and load in pages, so history older than the most recent few hundred queries is reachable for the first time.
@@ -2966,7 +2968,8 @@ TablePro is a native macOS database client built with SwiftUI and AppKit, design
     - Custom SQL query templates
     - Performance optimized for large datasets
 
-[Unreleased]: https://github.com/TableProApp/TablePro/compare/v0.64.0...HEAD
+[Unreleased]: https://github.com/TableProApp/TablePro/compare/v0.65.0...HEAD
+[0.65.0]: https://github.com/TableProApp/TablePro/compare/v0.64.0...v0.65.0
 [0.64.0]: https://github.com/TableProApp/TablePro/compare/v0.63.0...v0.64.0
 [0.63.0]: https://github.com/TableProApp/TablePro/compare/v0.62.0...v0.63.0
 [0.62.0]: https://github.com/TableProApp/TablePro/compare/v0.61.0...v0.62.0
