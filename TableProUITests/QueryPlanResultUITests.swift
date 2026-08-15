@@ -12,7 +12,7 @@ import XCTest
 final class QueryPlanResultUITests: UITestCase {
     func testExplainProducesAResultTabAlongsideTheData() throws {
         let app = try launchWithSampleDatabase()
-        runQuery("EXPLAIN QUERY PLAN SELECT * FROM users;", in: app)
+        runQuery("EXPLAIN QUERY PLAN SELECT * FROM Track;", in: app)
 
         let resultTab = app.buttons["result-tab"].firstMatch
         XCTAssertTrue(
@@ -29,7 +29,7 @@ final class QueryPlanResultUITests: UITestCase {
 
     func testTreeModeShowsTheOutlineWithColumns() throws {
         let app = try launchWithSampleDatabase()
-        runQuery("EXPLAIN QUERY PLAN SELECT * FROM users;", in: app)
+        runQuery("EXPLAIN QUERY PLAN SELECT * FROM Track;", in: app)
 
         let modePicker = app.radioGroups["query-plan-mode-picker"].firstMatch
         XCTAssertTrue(modePicker.waitForExistence(timeout: 20))
@@ -45,7 +45,7 @@ final class QueryPlanResultUITests: UITestCase {
 
     func testDiagramModeShowsTheScrollableCanvas() throws {
         let app = try launchWithSampleDatabase()
-        runQuery("EXPLAIN QUERY PLAN SELECT * FROM users;", in: app)
+        runQuery("EXPLAIN QUERY PLAN SELECT * FROM Track;", in: app)
 
         let canvas = app.descendants(matching: .any).matching(identifier: "query-plan-diagram").firstMatch
         XCTAssertTrue(canvas.waitForExistence(timeout: 20), "Diagram mode must show the plan canvas")
@@ -53,13 +53,17 @@ final class QueryPlanResultUITests: UITestCase {
 
     func testAPlanCanBePinnedLikeAnyResult() throws {
         let app = try launchWithSampleDatabase()
-        runQuery("EXPLAIN QUERY PLAN SELECT * FROM users;", in: app)
+        runQuery("EXPLAIN QUERY PLAN SELECT * FROM Track;", in: app)
 
         let resultTab = app.buttons["result-tab"].firstMatch
         XCTAssertTrue(resultTab.waitForExistence(timeout: 20))
         resultTab.rightClick()
 
-        let contextMenu = app.menus.firstMatch
+        /// A contextual menu opens inside the window; the menu-bar menus hang off `MenuBar`, so
+        /// scoping to the window isolates the one that just opened. Matching on the menu's
+        /// accessibility identifier instead worked here but not on the CI runner, whose macOS
+        /// build exposes the menu without it.
+        let contextMenu = app.windows.firstMatch.menus.firstMatch
         XCTAssertTrue(
             contextMenu.menuItems["Pin Result"].waitForExistence(timeout: 5),
             "A plan is a result set, so it must offer Pin Result"
@@ -77,9 +81,6 @@ final class QueryPlanResultUITests: UITestCase {
     // MARK: - Helpers
 
     private func runQuery(_ sql: String, in app: XCUIApplication) {
-        let editor = editorTextView(in: app)
-        XCTAssertTrue(editor.waitForExistence(timeout: 15))
-
         app.typeKey("t", modifierFlags: .command)
         let queryEditor = editorTextView(in: app)
         XCTAssertTrue(queryEditor.waitForExistence(timeout: 10))
