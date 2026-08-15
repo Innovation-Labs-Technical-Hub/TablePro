@@ -8,6 +8,11 @@ import SwiftUI
 import TableProPluginKit
 
 struct DatabaseTreeOutlineView: NSViewRepresentable {
+    /// The system's own sidebar row size, from System Settings > Appearance. Reading it here is
+    /// what makes a change to that setting reach the outline: SwiftUI re-runs `updateNSView` when
+    /// the environment value changes, so nothing has to be observed by hand.
+    @Environment(\.sidebarRowSize) private var systemRowSize
+
     let connectionId: UUID
     let databaseType: DatabaseType
     let coordinator: MainContentCoordinator?
@@ -24,6 +29,12 @@ struct DatabaseTreeOutlineView: NSViewRepresentable {
     let activeSchema: String?
     let selectedTables: Set<TableInfo>
     let showRecentTables: Bool
+    let rowSizePreference: SidebarRowSizePreference
+
+    /// The size the rows are actually drawn at, which is the system's unless the user overrode it.
+    var resolvedRowSize: SidebarRowSize {
+        SidebarRowSizeResolver.resolve(preference: rowSizePreference, system: systemRowSize)
+    }
 
     func makeCoordinator() -> DatabaseTreeOutlineCoordinator {
         DatabaseTreeOutlineCoordinator()
@@ -31,23 +42,14 @@ struct DatabaseTreeOutlineView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let outlineView = DatabaseTreeNSOutlineView()
-        outlineView.headerView = nil
-        outlineView.style = .sourceList
-        /// The two metrics come from AppKit rather than from taste: `.small` is the 24pt source
-        /// list row, and 13 is the indent a source list steps by. A hand-picked number here is the
-        /// difference between a sidebar that lines up with Finder and Xcode and one that nearly does.
-        outlineView.rowSizeStyle = .small
-        outlineView.indentationPerLevel = 13
-        outlineView.allowsMultipleSelection = true
-        outlineView.allowsEmptySelection = true
-        outlineView.floatsGroupRows = false
-        outlineView.autosaveExpandedItems = false
-        outlineView.backgroundColor = .clear
-
-        let column = NSTableColumn(identifier: NSUserInterfaceItemIdentifier("DatabaseTreeColumn"))
-        column.resizingMask = .autoresizingMask
-        outlineView.addTableColumn(column)
-        outlineView.outlineTableColumn = column
+        let scrollView = SidebarOutlineScaffold.makeScrollView(
+            outlineView: outlineView,
+            configuration: SidebarOutlineScaffold.Configuration(
+                columnIdentifier: "DatabaseTreeColumn",
+                allowsMultipleSelection: true,
+                rowSizePreference: rowSizePreference
+            )
+        )
 
         outlineView.dataSource = context.coordinator
         outlineView.delegate = context.coordinator
@@ -57,21 +59,20 @@ struct DatabaseTreeOutlineView: NSViewRepresentable {
         outlineView.doubleAction = #selector(DatabaseTreeOutlineCoordinator.handleDoubleClick)
         outlineView.selectionClearing = context.coordinator
 
+        /// The menu hangs off the table, not off the row's hosted view, so `NSTableView`'s own
+        /// secondary-click handling runs: it sets `clickedRow`, draws the clicked-row highlight, and
+        /// answers a right-click in the empty area below the last row.
+        let menu = NSMenu()
+        menu.delegate = context.coordinator
+        outlineView.menu = menu
+
         context.coordinator.attach(outlineView: outlineView)
         context.coordinator.update(from: self)
-
-        let scrollView = NSScrollView()
-        scrollView.documentView = outlineView
-        scrollView.hasVerticalScroller = true
-        scrollView.hasHorizontalScroller = false
-        scrollView.autohidesScrollers = true
-        scrollView.scrollerStyle = .overlay
-        scrollView.drawsBackground = false
-        scrollView.backgroundColor = .clear
         return scrollView
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
+        SidebarOutlineScaffold.applyRowSize(rowSizePreference, to: nsView)
         context.coordinator.update(from: self)
     }
 }

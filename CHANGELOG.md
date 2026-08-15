@@ -61,8 +61,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Plans that report a cost per node but no startup cost, such as MySQL's, now show that cost in the diagram and the tree.
 - Nodes in a plan whose root reports no cost are no longer all painted red.
 - PostgreSQL enum columns whose type lives in another schema now show their values instead of a plain text box.
+- Refreshing a database or schema from the sidebar no longer empties it. The tables and routines stayed on screen only until the refresh started, then came back when it finished, and a refresh that failed left an error where they had been.
+- Disabling a linked SQL folder no longer makes it disappear with no way back. It stays in the sidebar, marked disabled, so you can enable it again. Choosing the same folder from Add Linked SQL Folder now re-enables it instead of reporting that it is already linked.
+- Cmd-clicking or Shift-arrowing to select several tables no longer opens the table it added. Building a selection for Truncate, Delete or Export ran a query, replaced the tab, and could switch the active database.
+- Arrowing to a table in the sidebar now opens it right away. The open waited out the key repeat rate from System Settings, which is up to two seconds, even for a single press.
+- Collapsing a database or a section while the sidebar filter has text no longer throws away the layout you had before searching. The row sprang back open on the next keystroke, and stayed collapsed once the filter was cleared.
+- The favourite star in the sidebar now takes a click anywhere in its button, not only on the star itself. A near miss selected the table and opened it instead. Add to Favorites is also in the right-click menu now, so it no longer needs a hover to reach.
+- A connection dropping and reconnecting no longer reopens a sidebar you hid, or closes an inspector you opened.
+- Sidebar and inspector widths are remembered per window again. They were saved under whichever connection happened to be selected, so widths set for one connection were written under another's name.
+- The sidebar scrollers follow Show scroll bars in General settings instead of always overlaying.
+- A selected row in the Favorites list now reads correctly on the highlight. The linked file and folder icons were drawn in blue on the blue selection, and the keyword badge kept its unselected colours.
 
 - Select several databases or schemas in the sidebar tree and act on them at once: drop, refresh, copy names, or export. Shift-click and Cmd-click extend the selection.
+- The sidebar now follows Sidebar icon size in System Settings > Appearance, so it matches Finder and Mail. A Row Size control in General settings and in the sidebar's View Options menu overrides it when you want to fit more objects on screen.
+- Add to Favorites is now in the sidebar's right-click menu, so it no longer needs a hover to reach.
+- Right-clicking a row in the object list now highlights the row the menu will act on, the way Finder does. Right-clicking the empty space below the list gives a menu too, which is also how View Options stays reachable when the list is empty, loading or failed.
+- Typing in the sidebar filter no longer restarts its own delay when anything else redraws the sidebar, so the list settles when you stop typing rather than when the window next changes.
+- Favorites rows now follow the sidebar row size like the object list does, and both lists draw their rows at the same height. One inset its rows a point more than the other, so the two tabs of one sidebar did not line up.
+- Collapsing a database or schema is recorded once AppKit has applied it rather than just before, so the saved state always describes what is on screen.
+- The Favorites list right-click menu now highlights the row it acts on, and right-clicking the empty space below it offers New Query, New Favorite, New Folder and Add Linked SQL Folder. Those moved out of the bar at the bottom of the sidebar.
+- Renaming a favourites folder now edits the row itself. The field used to float above the list, so expanding or collapsing anything left it sitting over a different folder, and a new folder could open its rename before its row existed.
 - The database switcher takes a multiple selection too, with the same actions on the right-click menu.
 - Drop Schema for PostgreSQL, SQL Server and SurrealDB.
 - Quick Switcher can search tables and views across every open connection.
@@ -115,6 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- A filtered database tree now says so, with a banner naming how many of the databases it is showing and a button to show them all.
+- The bar at the bottom of the sidebar is gone, and everything it held moved somewhere a window can never hide. New Table and New View are in the Database menu and in the sidebar's right-click menu. Switching schema is Database > Schema, and the toolbar already shows which schema is active. The database filter is View > Filter Databases, also in the sidebar's right-click menu. The refresh spinner joined the other progress in the toolbar.
 - Clicking a table in the sidebar opens it right away. It used to wait out the double-click interval, about half a second, to find out whether a second click was coming. Double-click no longer opens a second copy of the table; **Open in New Tab** on the table's contextual menu does that.
 - Opening a table from the sidebar leaves the keyboard in the sidebar, so you can keep clicking or arrowing through tables and watch each one load. Click into the grid when you want to work in it.
 - Sidebar section titles are real source list headers now, the way Package Dependencies reads in Xcode's navigator: a short grey title with no icon, and the objects under it sitting at the same depth as a database instead of one step in.

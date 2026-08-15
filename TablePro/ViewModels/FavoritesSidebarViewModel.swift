@@ -101,6 +101,12 @@ internal struct FavoriteNode: Identifiable, Hashable {
         FavoriteNode(id: "linked-folder-\(folder.id)", content: .linkedFolder(folder), children: children)
     }
 
+    /// A disabled folder is not watched, so it has no files to disclose. It keeps its row and its id
+    /// so the contextual menu that re-enables it stays reachable and its expansion survives the round trip.
+    static func disabledLinkedFolder(_ folder: LinkedSQLFolder) -> FavoriteNode {
+        FavoriteNode(id: "linked-folder-\(folder.id)", content: .linkedFolder(folder), children: nil)
+    }
+
     static func linkedSubfolder(
         folderId: UUID,
         displayName: String,
@@ -154,7 +160,7 @@ internal final class FavoritesSidebarViewModel {
     var showDeleteConfirmation = false
     var favoritesToDelete: [SQLFavorite] = []
 
-    @ObservationIgnored private let connectionId: UUID
+    @ObservationIgnored internal let connectionId: UUID
     @ObservationIgnored private let cache: ConnectionDataCache
     @ObservationIgnored private let services: AppServices
     @ObservationIgnored private var manager: SQLFavoriteManager { services.sqlFavoriteManager }
@@ -164,6 +170,10 @@ internal final class FavoritesSidebarViewModel {
     var nodes: [FavoriteNode] {
         var roots = buildNodes(folders: cache.folders, favorites: cache.favorites, parentId: nil)
         for folder in cache.linkedFolders {
+            guard folder.isEnabled else {
+                roots.append(.disabledLinkedFolder(folder))
+                continue
+            }
             let files = cache.linkedFilesByFolderId[folder.id] ?? []
             let children = buildLinkedTree(files: files, folderId: folder.id)
             roots.append(.linkedFolder(folder, children: children))
@@ -306,7 +316,8 @@ internal final class FavoritesSidebarViewModel {
             let success = await manager.addFolder(folder)
             if success {
                 services.favoritesExpansionState.setFolderExpanded(folder.id, expanded: true, for: connectionId)
-                try? await Task.sleep(for: .milliseconds(100))
+                /// No wait for the row to appear. The rename request is held until the outline
+                /// actually has that row, which it reports itself.
                 startRenameFolder(folder)
             }
         }

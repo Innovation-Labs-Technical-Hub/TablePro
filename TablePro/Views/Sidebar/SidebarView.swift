@@ -11,7 +11,6 @@ import TableProPluginKit
 struct SidebarView: View {
     @State private var viewModel: SidebarViewModel
     @State private var settingsManager = AppSettingsManager.shared
-    @State private var showDatabaseFilter: Bool = false
 
     private var schemaService: SchemaService { SchemaService.shared }
 
@@ -56,11 +55,6 @@ struct SidebarView: View {
         )
     }
 
-    private var supportsSchemaFooter: Bool {
-        guard PluginManager.shared.supportsSchemaSwitching(for: viewModel.databaseType) else { return false }
-        return rootShape == .flat
-    }
-
     init(
         sidebarState: SharedSidebarState,
         windowState: WindowSidebarState,
@@ -77,7 +71,7 @@ struct SidebarView: View {
         _pendingDeletes = pendingDeletes
         let selectedBinding = Binding(
             get: { windowState.selectedTables },
-            set: { windowState.selectedTables = $0 }
+            set: { windowState.selectTables($0) }
         )
         let vm = SidebarViewModel.shared(
             connectionId: connectionId,
@@ -87,10 +81,8 @@ struct SidebarView: View {
             pendingDeletes: pendingDeletes,
             tableOperationOptions: tableOperationOptions
         )
-        vm.searchText = sidebarState.searchText
-        if databaseType == .redis, let existingVM = sidebarState.redisKeyTreeViewModel {
-            vm.redisKeyTreeViewModel = existingVM
-        }
+        /// Nothing observable is written here. This initializer runs on every evaluation of the
+        /// parent's body, and the view model already seeds its own filter and watches the field.
         _viewModel = State(wrappedValue: vm)
         self.connectionId = connectionId
         self.coordinator = coordinator
@@ -102,10 +94,7 @@ struct SidebarView: View {
         Group {
             switch sidebarState.selectedSidebarTab {
             case .tables:
-                VStack(spacing: 0) {
-                    tablesContent
-                    tablesBottomBar
-                }
+                tablesContent
             case .favorites:
                 if let coordinator {
                     FavoritesTabView(
@@ -118,9 +107,6 @@ struct SidebarView: View {
                     Color.clear
                 }
             }
-        }
-        .onChange(of: sidebarState.searchText) { _, newValue in
-            viewModel.searchText = newValue
         }
         .onChange(of: settingsManager.general.showRecentTables) { _, _ in
             sidebarState.reloadRecentTablesFromStore()
@@ -172,78 +158,6 @@ struct SidebarView: View {
         case .databaseTree: databaseTreeContent
         case .flat: flatContent
         }
-    }
-
-    // MARK: - Bottom Bar
-
-    private var tablesBottomBar: some View {
-        VStack(spacing: 0) {
-            Divider()
-            HStack(spacing: 8) {
-                createObjectMenu
-                if rootShape == .databaseTree {
-                    databaseFilterButton
-                }
-                DelayedProgressIndicator(isActive: schemaService.isRefreshing(connectionId: connectionId))
-                    .accessibilityLabel(String(localized: "Refreshing"))
-                Spacer()
-                if supportsSchemaFooter {
-                    SchemaPickerControl(
-                        connectionId: connectionId,
-                        databaseType: viewModel.databaseType,
-                        coordinator: coordinator
-                    )
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-        }
-    }
-
-    private var isDatabaseFilterActive: Bool {
-        !sidebarState.databaseFilterSelected.isEmpty
-    }
-
-    private var databaseFilterSelectionBinding: Binding<Set<String>> {
-        Binding(
-            get: { sidebarState.databaseFilterSelected },
-            set: { sidebarState.databaseFilterSelected = $0 }
-        )
-    }
-
-    private var databaseFilterButton: some View {
-        Button {
-            showDatabaseFilter = true
-        } label: {
-            Image(systemName: isDatabaseFilterActive
-                ? "line.3.horizontal.decrease.circle.fill"
-                : "line.3.horizontal.decrease.circle")
-                .foregroundStyle(isDatabaseFilterActive ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
-        }
-        .buttonStyle(.borderless)
-        .help(String(localized: "Filter databases"))
-        .accessibilityIdentifier("sidebar-database-filter")
-        .popover(isPresented: $showDatabaseFilter) {
-            DatabaseTreeFilterPopover(
-                connectionId: connectionId,
-                selectedDatabases: databaseFilterSelectionBinding
-            )
-        }
-    }
-
-    private var createObjectMenu: some View {
-        Menu {
-            Button(String(localized: "New Table")) { coordinator?.createNewTable() }
-            Button(String(localized: "New View")) { coordinator?.createView() }
-        } label: {
-            Image(systemName: "plus")
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help(String(localized: "Create a new table or view"))
-        .disabled(coordinator?.safeModeLevel.blocksAllWrites ?? true)
-        .accessibilityIdentifier("sidebar-create-table")
     }
 
     @ViewBuilder
@@ -372,7 +286,8 @@ struct SidebarView: View {
             activeDatabase: activeDatabase,
             activeSchema: coordinator?.toolbarState.currentSchema,
             selectedTables: windowState.selectedTables,
-            showRecentTables: settingsManager.general.showRecentTables
+            showRecentTables: settingsManager.general.showRecentTables,
+            rowSizePreference: settingsManager.general.sidebarRowSize
         )
     }
 

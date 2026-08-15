@@ -45,6 +45,9 @@ struct MenuValidationContext: Equatable {
     var supportsRestore = false
     var supportsServerDashboard = false
     var supportsUserManagement = false
+    var supportsSchemaSwitching = false
+    var canFilterDatabases = false
+    var hasDatabaseFilter = false
 }
 
 extension MainSplitViewController: NSMenuItemValidation {
@@ -157,6 +160,12 @@ extension MainSplitViewController: NSMenuItemValidation {
             return context.isConnected && context.canEditViewDefinition
         case #selector(runMaintenanceOperation(_:)):
             return context.isConnected && context.hasMaintenanceOperations
+        case #selector(switchToSchema(_:)):
+            return context.isConnected && context.supportsSchemaSwitching
+        case #selector(filterDatabases(_:)):
+            return context.isConnected && context.canFilterDatabases
+        case #selector(showAllDatabases(_:)):
+            return context.isConnected && context.canFilterDatabases && context.hasDatabaseFilter
         case #selector(openContainerSwitcher(_:)):
             return context.isConnected && context.supportsContainerSwitching
         case #selector(showServerDashboard(_:)):
@@ -215,7 +224,10 @@ extension MainSplitViewController: NSMenuItemValidation {
             supportsBackup: actions.supportsBackup,
             supportsRestore: actions.supportsRestore,
             supportsServerDashboard: actions.supportsServerDashboard,
-            supportsUserManagement: actions.supportsUserManagement
+            supportsUserManagement: actions.supportsUserManagement,
+            supportsSchemaSwitching: actions.supportsSchemaSwitching,
+            canFilterDatabases: actions.canFilterDatabases,
+            hasDatabaseFilter: actions.hasDatabaseFilter
         )
     }
 

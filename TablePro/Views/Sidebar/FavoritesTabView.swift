@@ -2,6 +2,8 @@ import SwiftUI
 import TableProImport
 
 internal struct FavoritesTabView: View {
+    @Environment(\.sidebarRowSize) private var systemRowSize
+
     @State private var viewModel: FavoritesSidebarViewModel
     @State private var favoriteTables: [FavoriteTablesStorage.FavoriteEntry] = []
     @State private var folderToDelete: SQLFavoriteFolder?
@@ -65,18 +67,13 @@ internal struct FavoritesTabView: View {
                     favoritesList(items, filteredTables: filteredTables)
                 }
             }
-
-            VStack(spacing: 0) {
-                Divider()
-                bottomToolbar
-            }
         }
         .onAppear {
-            SQLFolderWatcher.shared.start()
-            favoriteTables = FavoriteTablesStorage.shared.favorites(for: connectionId).sorted { $0.name < $1.name }
+            viewModel.startWatchingLinkedFolders()
+            favoriteTables = viewModel.favoriteTables(for: connectionId)
         }
         .onReceive(NotificationCenter.default.publisher(for: .favoriteTablesDidChange)) { _ in
-            favoriteTables = FavoriteTablesStorage.shared.favorites(for: connectionId).sorted { $0.name < $1.name }
+            favoriteTables = viewModel.favoriteTables(for: connectionId)
         }
         .sheet(item: $viewModel.editDialogItem) { item in
             FavoriteEditDialog(
@@ -115,8 +112,7 @@ internal struct FavoritesTabView: View {
                 linkedFolderToRemove = nil
             }
             Button(String(localized: "Remove"), role: .destructive) {
-                LinkedSQLFolderStorage.shared.removeFolder(folder)
-                SQLFolderWatcher.shared.reload()
+                viewModel.removeLinkedFolder(folder)
                 linkedFolderToRemove = nil
             }
         } message: { folder in
@@ -132,7 +128,7 @@ internal struct FavoritesTabView: View {
             }
             Button(String(localized: "Move to Trash"), role: .destructive) {
                 coordinator?.trashLinkedFavorite(file)
-                SQLFolderWatcher.shared.reload()
+                viewModel.reloadLinkedFolders()
                 linkedFileToTrash = nil
             }
         } message: { file in
@@ -235,14 +231,18 @@ internal struct FavoritesTabView: View {
                 teamQueries: teamLibraryQueries.map {
                     FavoritesOutlineTeamQuery(id: $0.id, name: $0.name, publishedBy: $0.publishedBy)
                 },
-                renamingFolderId: viewModel.renamingFolderId
+                renamingFolderId: viewModel.renamingFolderId,
+                allFolders: viewModel.nodes.collectFolders(),
+                teamLibraryAvailable: LicenseManager.shared.isFeatureAvailable(.teamLibrary)
             ),
             selection: $sharedSidebarState.selectedFavorite,
+            rowSizePreference: AppSettingsManager.shared.general.sidebarRowSize,
             actions: FavoritesOutlineActions(
                 primaryAction: { handlePrimaryAction($0) },
                 deleteSelection: { deleteNode($0) },
                 commitRename: { folder, name in viewModel.commitRenameFolder(folder, to: name) },
-                cancelRename: { viewModel.renamingFolderId = nil }
+                cancelRename: { viewModel.renamingFolderId = nil },
+                performMenuCommand: { perform($0) }
             ),
             row: { outlineRow($0) }
         )
@@ -250,13 +250,27 @@ internal struct FavoritesTabView: View {
 
     /// The cell pins its hosted view to the full row width, and `NSHostingView` centers a root view
     /// narrower than its bounds, so the row has to claim that width itself or short content drifts
-    /// to the middle and the context menu goes with it.
+    /// to the middle.
     private func outlineRow(_ node: FavoritesOutlineNode) -> some View {
         rowContent(node)
+            .font(resolvedRowSize.rowFont)
+            .imageScale(.medium)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
     }
 
+    /// AppKit sizes the row from `rowSizeStyle`, but it does that by laying out
+    /// `NSTableCellView.textField`, and these cells host SwiftUI instead. Without this the object
+    /// list grew with the sidebar size and the Favorites list beside it did not.
+    private var resolvedRowSize: SidebarRowSize {
+        SidebarRowSizeResolver.resolve(
+            preference: AppSettingsManager.shared.general.sidebarRowSize,
+            system: systemRowSize
+        )
+    }
+
+    /// No `.contextMenu` on any row: the outline view owns the menu, so AppKit sets `clickedRow`,
+    /// highlights the clicked row and answers a right-click below the last one.
     @ViewBuilder
     private func rowContent(_ node: FavoritesOutlineNode) -> some View {
         switch node.kind {
@@ -266,7 +280,6 @@ internal struct FavoritesTabView: View {
                 .foregroundStyle(.secondary)
         case .table(let table):
             favoriteTableRow(table: table)
-                .contextMenu { favoriteTableContextMenu(table) }
         case .query(let favoriteNode):
             favoriteQueryRow(favoriteNode)
         case .teamQuery(_, let name, let publishedBy):
@@ -279,18 +292,14 @@ internal struct FavoritesTabView: View {
         switch node.content {
         case .favorite(let favorite):
             FavoriteRowView(favorite: favorite)
-                .contextMenu { favoriteContextMenu(favorite) }
         case .folder(let folder):
             Label(folder.name, systemImage: "folder")
-                .contextMenu { folderContextMenu(folder) }
         case .linkedFolder(let folder):
             LinkedFolderRowLabel(folder: folder)
-                .contextMenu { linkedFolderContextMenu(folder) }
         case .linkedSubfolder(_, let displayName, _):
             LinkedSubfolderRowLabel(displayName: displayName)
         case .linkedFavorite(let linked):
             LinkedFavoriteRowView(favorite: linked)
-                .contextMenu { linkedFavoriteContextMenu(linked) }
         }
     }
 
@@ -389,177 +398,88 @@ internal struct FavoritesTabView: View {
         }
     }
 
-    // MARK: - Context Menus
+    // MARK: - Menu commands
 
-    @ViewBuilder
-    private func favoriteContextMenu(_ favorite: SQLFavorite) -> some View {
-        Button(String(localized: "Insert in Editor")) {
+    /// Runs what a contextual menu item described. The commands that end in a confirmation set the
+    /// state this view already owns, so the alert stays where the rest of the presentation is.
+    private func perform(_ command: FavoritesMenuCommand) {
+        switch command {
+        case .openTable(let table):
+            coordinator?.openTableTab(table, activateGridFocus: true)
+        case .showERDiagram:
+            coordinator?.showERDiagram()
+        case .removeTableFavorite(let table):
+            viewModel.removeTableFavorite(table, database: activeDatabase)
+        case .insertFavorite(let favorite):
             coordinator?.insertFavorite(favorite)
-        }
-
-        Button(String(localized: "Run in New Tab")) {
+        case .runFavoriteInNewTab(let favorite):
             coordinator?.runFavoriteInNewTab(favorite)
-        }
-
-        Divider()
-
-        Button {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(favorite.query, forType: .string)
-        } label: {
-            Label(String(localized: "Copy Query"), systemImage: "doc.on.doc")
-        }
-
-        Button(String(localized: "Edit...")) {
+        case .copyText(let text):
+            ClipboardService.shared.writeText(text)
+        case .editFavorite(let favorite):
             viewModel.editFavorite(favorite)
-        }
-
-        let allFolders = viewModel.nodes.collectFolders()
-        if !allFolders.isEmpty {
-            Menu(String(localized: "Move to")) {
-                if favorite.folderId != nil {
-                    Button(String(localized: "Root Level")) {
-                        viewModel.moveFavorite(id: favorite.id, toFolder: nil)
-                    }
-
-                    Divider()
-                }
-
-                ForEach(allFolders) { folder in
-                    if folder.id != favorite.folderId {
-                        Button(folder.name) {
-                            viewModel.moveFavorite(id: favorite.id, toFolder: folder.id)
-                            FavoritesExpansionState.shared.setFolderExpanded(folder.id, expanded: true, for: connectionId)
-                        }
-                    }
-                }
+        case .moveFavorite(let id, let folderId):
+            viewModel.moveFavorite(id: id, toFolder: folderId)
+            if let folderId {
+                FavoritesExpansionState.shared.setFolderExpanded(folderId, expanded: true, for: connectionId)
             }
-        }
-
-        Divider()
-
-        Button(role: .destructive) {
+        case .deleteFavorite(let favorite):
             viewModel.deleteFavorite(favorite)
-        } label: {
-            Text(String(localized: "Delete"))
-        }
-    }
-
-    @ViewBuilder
-    private func linkedFavoriteContextMenu(_ favorite: LinkedSQLFavorite) -> some View {
-        Button(String(localized: "Open in Editor")) {
+        case .openLinkedFavorite(let favorite):
             coordinator?.openLinkedFavorite(favorite)
-        }
-
-        Button(String(localized: "Edit Metadata...")) {
+        case .editLinkedMetadata(let favorite):
             linkedMetadataTarget = favorite
-        }
-
-        Divider()
-
-        Button {
-            NSPasteboard.general.clearContents()
-            if let loaded = FileTextLoader.load(favorite.fileURL) {
-                NSPasteboard.general.setString(loaded.content, forType: .string)
-            }
-        } label: {
-            Label(String(localized: "Copy Query"), systemImage: "doc.on.doc")
-        }
-
-        Button(String(localized: "Show in Finder")) {
+        case .copyLinkedFavoriteQuery(let favorite):
+            guard let loaded = FileTextLoader.load(favorite.fileURL) else { return }
+            ClipboardService.shared.writeText(loaded.content)
+        case .revealLinkedFavorite(let favorite):
             coordinator?.revealLinkedFavoriteInFinder(favorite)
-        }
-
-        Divider()
-
-        Button(role: .destructive) {
+        case .trashLinkedFavorite(let favorite):
             linkedFileToTrash = favorite
             showTrashLinkedFileAlert = true
-        } label: {
-            Text(String(localized: "Move File to Trash"))
-        }
-    }
-
-    @ViewBuilder
-    private func linkedFolderContextMenu(_ folder: LinkedSQLFolder) -> some View {
-        Button(String(localized: "Show in Finder")) {
-            NSWorkspace.shared.activateFileViewerSelecting([folder.expandedURL])
-        }
-
-        Button {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(folder.expandedURL.path, forType: .string)
-        } label: {
-            Label(String(localized: "Copy Path"), systemImage: "doc.on.doc")
-        }
-
-        Divider()
-
-        Button(folder.isEnabled
-               ? String(localized: "Disable")
-               : String(localized: "Enable")) {
-            toggleLinkedFolder(folder)
-        }
-
-        Button(String(localized: "Reload")) {
-            SQLFolderWatcher.shared.reload()
-        }
-
-        Divider()
-
-        Button(String(localized: "Add Another SQL Folder...")) {
+        case .revealLinkedFolder(let folder):
+            viewModel.revealLinkedFolder(folder)
+        case .setLinkedFolderEnabled(let folder, let isEnabled):
+            viewModel.setLinkedFolder(folder, enabled: isEnabled)
+        case .reloadLinkedFolders:
+            viewModel.reloadLinkedFolders()
+        case .addLinkedFolder:
             addLinkedFolder()
-        }
-
-        Divider()
-
-        Button(role: .destructive) {
+        case .removeLinkedFolder(let folder):
             linkedFolderToRemove = folder
             showRemoveLinkedFolderAlert = true
-        } label: {
-            Text(String(localized: "Remove from Sidebar"))
-        }
-    }
-
-    private func toggleLinkedFolder(_ folder: LinkedSQLFolder) {
-        var updated = folder
-        updated.isEnabled.toggle()
-        LinkedSQLFolderStorage.shared.updateFolder(updated)
-        SQLFolderWatcher.shared.reload()
-    }
-
-    @ViewBuilder
-    private func folderContextMenu(_ folder: SQLFavoriteFolder) -> some View {
-        Button(String(localized: "Rename")) {
+        case .renameFolder(let folder):
             viewModel.startRenameFolder(folder)
-        }
-
-        Button(String(localized: "New Favorite...")) {
-            viewModel.createFavorite(folderId: folder.id)
-        }
-
-        Button(String(localized: "New Subfolder")) {
-            viewModel.createFolder(parentId: folder.id)
-        }
-
-        Divider()
-
-        Button(role: .destructive) {
+        case .newFavorite(let folderId):
+            viewModel.createFavorite(folderId: folderId)
+        case .newFolder(let parentId):
+            viewModel.createFolder(parentId: parentId)
+        case .deleteFolder(let folder):
             folderToDelete = folder
             showDeleteFolderAlert = true
-        } label: {
-            Text(String(localized: "Delete Folder"))
+        case .newQuery:
+            coordinator?.commandActions?.newTab()
+        case .publishSavedQueriesToTeam:
+            publishSavedQueriesToTeam()
         }
     }
 
     // MARK: - Empty States
 
+    /// An empty list has no row to right-click, so the commands the background menu carries have to
+    /// be here too. They used to live in a bar at the bottom of the sidebar.
     private var emptyState: some View {
         ContentUnavailableView {
             Label(String(localized: "No Favorites"), systemImage: "star")
         } description: {
             Text("Save frequently used queries, or link a folder of .sql files to share with your team.")
         } actions: {
+            Button(String(localized: "New Favorite...")) {
+                viewModel.createFavorite()
+            }
+            Button(String(localized: "New Folder")) {
+                viewModel.createFolder()
+            }
             Button(String(localized: "Link a Folder...")) {
                 addLinkedFolder()
             }
@@ -572,45 +492,6 @@ internal struct FavoritesTabView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Bottom Toolbar
-
-    private var bottomToolbar: some View {
-        HStack(spacing: 8) {
-            Menu {
-                Button(String(localized: "New Query")) {
-                    coordinator?.commandActions?.newTab()
-                }
-                Divider()
-                Button(String(localized: "New Favorite")) {
-                    viewModel.createFavorite()
-                }
-                Button(String(localized: "New Folder")) {
-                    viewModel.createFolder()
-                }
-                Divider()
-                Button(String(localized: "Add Linked SQL Folder...")) {
-                    addLinkedFolder()
-                }
-                if LicenseManager.shared.isFeatureAvailable(.teamLibrary) {
-                    Divider()
-                    Button(String(localized: "Publish Saved Queries to Team...")) {
-                        publishSavedQueriesToTeam()
-                    }
-                }
-            } label: {
-                Image(systemName: "plus")
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .help(String(localized: "New Query, favorite, or folder"))
-
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-    }
-
     private func addLinkedFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -621,21 +502,14 @@ internal struct FavoritesTabView: View {
         guard let window = AlertHelper.resolveWindow(nil) else { return }
         panel.beginSheetModal(for: window) { response in
             guard response == .OK, let url = panel.url else { return }
-            let path = PathPortability.contractHome(url.path)
-            let existing = LinkedSQLFolderStorage.shared.loadFolders()
-            guard !existing.contains(where: { $0.path == path }) else {
+            MainActor.assumeIsolated {
+                guard case .alreadyLinked(let name) = viewModel.addLinkedFolder(at: url) else { return }
                 AlertHelper.showInfoSheet(
                     title: String(localized: "This folder is already linked"),
-                    message: String(
-                        format: String(localized: "%@ is already in the favorites list."),
-                        url.lastPathComponent
-                    ),
+                    message: String(format: String(localized: "%@ is already in the favorites list."), name),
                     window: window
                 )
-                return
             }
-            LinkedSQLFolderStorage.shared.addFolder(LinkedSQLFolder(path: path))
-            SQLFolderWatcher.shared.reload()
         }
     }
 }
