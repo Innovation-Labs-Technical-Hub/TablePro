@@ -19,20 +19,46 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
 
     // MARK: - Payload & Session
 
-    let payload: EditorTabPayload?
+    /// The connections this window hosts. A window used to answer this with its own identity,
+    /// which could only ever name one, so every field below reads through the selected entry.
+    let workspaces = ConnectionWorkspaceRegistry()
+
+    var payload: EditorTabPayload? { workspaces.selected?.payload }
+
     /// Re-read when the connection record changes, so a rename reaches the window's name and
     /// the connecting screen instead of freezing whatever the record said at creation.
-    private(set) var payloadConnection: DatabaseConnection?
-    private var currentSession: ConnectionSession?
-    private var sessionState: SessionStateFactory.SessionState?
-    private var rightPanelState: RightPanelState?
+    var payloadConnection: DatabaseConnection? {
+        get { workspaces.selected?.payloadConnection }
+        set { workspaces.selected?.payloadConnection = newValue }
+    }
 
-    let autoConnect: Bool
-    var attemptToken: UUID?
+    private var currentSession: ConnectionSession? {
+        get { workspaces.selected?.session }
+        set { workspaces.selected?.session = newValue }
+    }
 
-    private(set) var phase: ConnectionWindowPhase {
-        didSet {
-            guard phase != oldValue else { return }
+    private var sessionState: SessionStateFactory.SessionState? {
+        get { workspaces.selected?.sessionState }
+        set { workspaces.selected?.sessionState = newValue }
+    }
+
+    private var rightPanelState: RightPanelState? {
+        get { workspaces.selected?.rightPanelState }
+        set { workspaces.selected?.rightPanelState = newValue }
+    }
+
+    var autoConnect: Bool { workspaces.selected?.autoConnect ?? false }
+
+    var attemptToken: UUID? {
+        get { workspaces.selected?.attemptToken }
+        set { workspaces.selected?.attemptToken = newValue }
+    }
+
+    var phase: ConnectionWindowPhase {
+        get { workspaces.selected?.phase ?? .idle }
+        set {
+            guard let selected = workspaces.selected, selected.phase != newValue else { return }
+            selected.phase = newValue
             applyPhase()
         }
     }
@@ -80,6 +106,14 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
 
     private var toolbarOwner: MainWindowToolbar?
 
+    /// The coordinator currently treated as this window's active one, so a workspace switch can
+    /// hand over key-window state the same way AppKit would between windows.
+    private weak var lastActiveCoordinator: MainContentCoordinator?
+
+    /// Set only for the duration of a workspace switch, so the work `rebuildPanes` does can be
+    /// attributed without every other caller of it paying for a timer.
+    private var switchTrace: WorkspaceSwitchTrace?
+
     // MARK: - Observers
 
     private var connectionStatusCancellable: AnyCancellable?
@@ -89,54 +123,86 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
     // MARK: - Init
 
     init(payload: EditorTabPayload?, sessionState: SessionStateFactory.SessionState?, autoConnect: Bool = false) {
-        self.payload = payload
-        self.autoConnect = autoConnect
-        if let connectionId = payload?.connectionId {
-            self.payloadConnection = DatabaseManager.shared.activeSessions[connectionId]?.connection
-                ?? ConnectionStorage.shared.loadConnections().first { $0.id == connectionId }
-        } else {
-            self.payloadConnection = nil
-        }
+        self.windowTitle = ""
+        self.windowSubtitle = ""
 
+        super.init(nibName: nil, bundle: nil)
+
+        adoptWorkspace(payload: payload, autoConnect: autoConnect)
+
+        /// AppKit renders a native tab's label even for a tab that is never activated, so the
+        /// title has to be right at creation rather than at first appearance.
+        applyWindowTitle()
+    }
+
+    /// Builds the workspace for one connection and hands it to the registry. A window reaches
+    /// here once per connection it hosts, so nothing may assume it runs only at construction.
+    @discardableResult
+    internal func adoptWorkspace(payload: EditorTabPayload?, autoConnect: Bool) -> ConnectionWorkspace? {
         var resolvedSession: ConnectionSession?
         if let connectionId = payload?.connectionId {
             resolvedSession = DatabaseManager.shared.activeSessions[connectionId]
         } else if let currentId = DatabaseManager.shared.lastActiveSessionId {
             resolvedSession = DatabaseManager.shared.activeSessions[currentId]
         }
-        self.currentSession = resolvedSession
 
-        self.windowTitle = ""
-        self.windowSubtitle = ""
+        guard let connectionId = payload?.connectionId ?? resolvedSession?.connection.id else { return nil }
 
+        if let existing = workspaces.workspace(for: connectionId) {
+            workspaces.select(connectionId)
+            return existing
+        }
+
+        let resolvedConnection = DatabaseManager.shared.activeSessions[connectionId]?.connection
+            ?? ConnectionStorage.shared.loadConnections().first { $0.id == connectionId }
+
+        var state: SessionStateFactory.SessionState?
+        var panelState: RightPanelState?
         if let session = resolvedSession {
-            self.rightPanelState = RightPanelState(connectionId: session.connection.id)
-            let state: SessionStateFactory.SessionState
+            panelState = RightPanelState(connectionId: session.connection.id)
             if let payloadId = payload?.id,
                let pending = SessionStateFactory.consumePending(for: payloadId) {
                 state = pending
                 Self.lifecycleLogger.info(
-                    "[open] MainSplitVC.init consumed pending payloadId=\(payloadId, privacy: .public)"
+                    "[open] MainSplitVC.adoptWorkspace consumed pending payloadId=\(payloadId, privacy: .public)"
                 )
             } else {
                 state = SessionStateFactory.create(connection: session.connection, payload: payload)
             }
-            self.sessionState = state
         }
 
+        let phase: ConnectionWindowPhase
         if resolvedSession?.driver != nil {
-            self.phase = .connected
+            phase = .connected
         } else if resolvedSession != nil {
-            self.phase = .connecting
+            phase = .connecting
         } else {
-            self.phase = .idle
+            phase = .idle
         }
 
-        super.init(nibName: nil, bundle: nil)
+        let workspace = ConnectionWorkspace(
+            connectionId: connectionId,
+            payload: payload,
+            autoConnect: autoConnect,
+            payloadConnection: resolvedConnection,
+            session: resolvedSession,
+            sessionState: state,
+            rightPanelState: panelState,
+            phase: phase
+        )
+        let adopted = workspaces.insert(workspace)
 
-        /// AppKit renders a native tab's label even for a tab that is never activated, so the
-        /// title has to be right at creation rather than at first appearance.
-        applyWindowTitle()
+        /// A workspace adopted into a window that is already on screen has to dial for itself.
+        /// `viewWillAppear` is what starts the connect for the window's first workspace, and it
+        /// runs once: every connection opened into that window afterwards reached the registry
+        /// with its intent to connect recorded and nothing left to act on it, so picking a
+        /// connection from the toolbar switcher landed on the not-connected pane with a Connect
+        /// button the user had to press themselves. The guard is the lifecycle, not a special
+        /// case: before the view loads there are no panes for a phase change to repaint.
+        if isViewLoaded, view.window != nil {
+            startActivationConnectIfNeeded()
+        }
+        return adopted
     }
 
     @available(*, unavailable)
@@ -152,9 +218,8 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
         splitView.dividerStyle = .thin
         splitView.isVertical = true
 
-        navigationSidebar = NavigationSidebarViewController(
-            connectionId: payload?.connectionId ?? currentSession?.connection.id
-        )
+        navigationSidebar = NavigationSidebarViewController()
+        navigationSidebar.railController.host = self
         navigationSidebar.railController.onLayoutChange = { [weak self] _ in
             self?.navigationSidebar.applyRailWidth(animated: false)
             self?.recomputeWindowMinSize()
@@ -187,6 +252,17 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
         /// The saved layout is restored before any phase-driven collapse, so the user's widths
         /// are already in the live layout. Uncollapsing then returns the pane to the size
         /// `NSSplitViewItem` remembers, rather than depending on a second restore.
+        workspaces.onSelectionChange = { [weak self] _ in
+            self?.applySelectedWorkspace()
+        }
+
+        /// A connection joining or leaving the window changes what every rail in the app lists,
+        /// which is what this event is for. Which row is current is a separate question, answered
+        /// by the rail reading its host back, so a selection change must not come through here.
+        workspaces.onMembershipChange = {
+            AppEvents.shared.connectionWindowsChanged.send()
+        }
+
         restoreUserPaneLayout()
         rebuildPanes()
         applyPaneChrome()
@@ -262,11 +338,17 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
 
     /// `nil` is the documented bulk-update payload, so it has to repaint too.
     private func handleConnectionRecordChange(_ changedId: UUID?) {
-        guard let connectionId = payload?.connectionId ?? currentSession?.connection.id else { return }
-        guard changedId == nil || changedId == connectionId else { return }
-        guard let stored = ConnectionStorage.shared.loadConnections().first(where: { $0.id == connectionId })
-            ?? DatabaseManager.shared.activeSessions[connectionId]?.connection else { return }
-        payloadConnection = stored
+        let stored = ConnectionStorage.shared.loadConnections()
+        var repaint = false
+        for workspace in workspaces.workspaces {
+            let connectionId = workspace.connectionId
+            guard changedId == nil || changedId == connectionId else { continue }
+            guard let record = stored.first(where: { $0.id == connectionId })
+                ?? DatabaseManager.shared.activeSessions[connectionId]?.connection else { continue }
+            workspace.payloadConnection = record
+            if workspaces.selectedConnectionId == connectionId { repaint = true }
+        }
+        guard repaint else { return }
         applyWindowTitle()
         rebuildPanes()
     }
@@ -277,34 +359,45 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
     /// one, and `NSToolbar` asks it once, so a toolbar created early is permanently empty: a
     /// later coordinator cannot refill it, and validation only speaks to items that already
     /// exist. A window with no session shows a plain titlebar instead.
+    /// `NSToolbar` asks its delegate for an item once and keeps what it returns, and every item
+    /// view captures the coordinator it was built with. Reassigning the owner's coordinator
+    /// therefore repoints nothing: the toolbar goes on naming, and acting on, the connection it
+    /// was built for. Switching connection rebuilds it instead.
     func installToolbar(coordinator: MainContentCoordinator) {
         guard let window = view.window else { return }
+        if let owner = toolbarOwner, owner.coordinator !== coordinator {
+            invalidateToolbar()
+        }
         if toolbarOwner == nil {
             toolbarOwner = MainWindowToolbar(coordinator: coordinator)
-        } else {
-            toolbarOwner?.coordinator = coordinator
         }
         if let owner = toolbarOwner, window.toolbar !== owner.managedToolbar {
             window.toolbar = owner.managedToolbar
         }
     }
 
+    /// The window's toolbar goes too. Dropping only the owner left the built `NSToolbar` on the
+    /// window with item views still pointing at the coordinator that was just released.
     func invalidateToolbar() {
         toolbarOwner?.invalidate()
         toolbarOwner = nil
+        if isViewLoaded { view.window?.toolbar = nil }
     }
 
     // MARK: - Connection Status
 
+    /// Every hosted connection reconciles, not only the one on screen. A background workspace
+    /// that loses its session still has to reach the right phase, or switching to it later
+    /// would show content for a connection that is already gone.
     private func handleConnectionStatusChange() {
         defer { toolbarOwner?.syncSidebarSelection() }
-        let resolvedId = payload?.connectionId ?? currentSession?.id ?? DatabaseManager.shared.lastActiveSessionId
-
-        guard let sid = resolvedId else {
-            if currentSession != nil { currentSession = nil }
-            return
+        for workspace in workspaces.workspaces {
+            reconcileStatus(of: workspace)
         }
+    }
 
+    private func reconcileStatus(of workspace: ConnectionWorkspace) {
+        let sid = workspace.connectionId
         let session = DatabaseManager.shared.activeSessions[sid]
         let snapshot = ConnectionSessionSnapshot(
             exists: session != nil,
@@ -313,51 +406,104 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
             wasDisconnectedByUser: DatabaseManager.shared.wasDisconnectedByUser(sid)
         )
         let nextPhase = ConnectionWindowPhaseMachine.onSessionChanged(
-            phase: phase,
+            phase: workspace.phase,
             session: snapshot,
-            ownsAttempt: attemptToken != nil
+            ownsAttempt: workspace.attemptToken != nil
         )
+        let isSelected = workspaces.selectedConnectionId == sid
 
         if nextPhase == .connected, let session {
-            let alreadyRendered = currentSession?.isContentViewEquivalent(to: session) ?? false
-            if alreadyRendered, phase == nextPhase { return }
-            adoptSession(session)
-            if phase == nextPhase { rebuildPanes() }
-        } else if phase == .connected, nextPhase != .connected, !snapshot.exists {
-            releaseSession(sid)
+            let alreadyRendered = workspace.session?.isContentViewEquivalent(to: session) ?? false
+            if alreadyRendered, workspace.phase == nextPhase { return }
+            adoptSession(session, into: workspace)
+            if workspace.phase == nextPhase, isSelected { rebuildPanes() }
+        } else if workspace.phase == .connected, nextPhase != .connected, !snapshot.exists {
+            releaseSession(workspace)
         }
 
-        phase = nextPhase
+        transition(to: nextPhase, for: sid)
     }
 
-    private func adoptSession(_ session: ConnectionSession) {
-        currentSession = session
+    private func adoptSession(_ session: ConnectionSession, into workspace: ConnectionWorkspace) {
+        workspace.session = session
 
-        if rightPanelState == nil {
-            rightPanelState = RightPanelState(connectionId: session.connection.id)
+        if workspace.rightPanelState == nil {
+            workspace.rightPanelState = RightPanelState(connectionId: session.connection.id)
         }
-        if sessionState == nil {
-            let state = SessionStateFactory.create(connection: session.connection, payload: payload)
-            sessionState = state
+        if workspace.sessionState == nil {
+            let state = SessionStateFactory.create(connection: session.connection, payload: workspace.payload)
+            workspace.sessionState = state
             state.coordinator.inspectorProxy = self
             state.coordinator.splitViewController = self
-            installToolbar(coordinator: state.coordinator)
+            if workspaces.selectedConnectionId == workspace.connectionId {
+                installToolbar(coordinator: state.coordinator)
+            }
         }
+        workspace.drainPendingPayloads()
     }
 
     /// Only called once the session entry is gone. A session that still exists without a driver
     /// is reconnecting, and tearing the coordinator down for that takes the user's open tabs and
     /// unsaved query edits with it over a network blip that repairs itself seconds later.
-    private func releaseSession(_ connectionId: UUID) {
+    private func releaseSession(_ workspace: ConnectionWorkspace) {
         Self.lifecycleLogger.info(
-            "[close] MainSplitVC session removed connId=\(connectionId, privacy: .public)"
+            "[close] MainSplitVC session removed connId=\(workspace.connectionId, privacy: .public)"
         )
-        rightPanelState?.teardown()
-        rightPanelState = nil
-        sessionState?.coordinator.teardown()
-        sessionState = nil
-        currentSession = nil
-        navigationSidebar.objectBrowser.updateSidebarState(nil)
+        workspace.rightPanelState?.teardown()
+        workspace.rightPanelState = nil
+        workspace.sessionState?.coordinator.teardown()
+        workspace.sessionState = nil
+        workspace.session = nil
+        if workspaces.selectedConnectionId == workspace.connectionId {
+            navigationSidebar.objectBrowser.updateSidebarState(nil)
+        }
+    }
+
+    /// Switching workspace repaints the window in place. The rail used to raise a different
+    /// window instead, which is what made several connections mean several windows.
+    internal func applySelectedWorkspace() {
+        let trace = WorkspaceSwitchTrace(connectionId: workspaces.selectedConnectionId)
+        switchTrace = trace
+        defer {
+            switchTrace = nil
+            trace.endAfterDisplay()
+        }
+
+        /// Switching workspace is this window's key-window change as far as a coordinator is
+        /// concerned. Only the selected one receives the real `windowDidBecomeKey`, so without
+        /// this the outgoing connection keeps `isKeyWindow` true and never schedules the eviction
+        /// that frees its row buffers.
+        let incoming = workspaces.selected?.sessionState?.coordinator
+        if lastActiveCoordinator !== incoming {
+            lastActiveCoordinator?.handleWindowDidResignKey()
+            incoming?.handleWindowDidBecomeKey()
+            lastActiveCoordinator = incoming
+        }
+        trace.stage("keyHandover")
+
+        /// A workspace with no session has no toolbar of its own, and the outgoing one's is not a
+        /// stand-in: it names the other connection, its database and its schema, and every one of
+        /// its buttons still acts on that connection. Switching to a connection that has not come
+        /// up yet showed the previous connection's engine icon and schema over a pane that said
+        /// the new one was not connected. A plain titlebar is what a sessionless window shows.
+        if let coordinator = workspaces.selected?.sessionState?.coordinator {
+            coordinator.inspectorProxy = self
+            coordinator.splitViewController = self
+            installToolbar(coordinator: coordinator)
+        } else {
+            invalidateToolbar()
+        }
+        trace.stage("toolbar")
+
+        rebuildPanes()
+        applyPaneChrome()
+        applyWindowTitle()
+        trace.stage("chrome")
+
+        /// Only this window's rail moved, and only its highlight. Broadcasting instead made every
+        /// rail in the app rebuild its whole entry list to answer a question none of them asked.
+        navigationSidebar?.railController.refreshSelection()
+        trace.stage("rail")
     }
 
     private func applyPhase() {
@@ -386,16 +532,40 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
         phase = next
     }
 
+    /// A window now hosts several connections, so a phase change has to name the one it belongs
+    /// to. Repainting is skipped for a workspace the user is not looking at: its state is still
+    /// correct, it simply is not the thing on screen.
+    internal func transition(to next: ConnectionWindowPhase, for connectionId: UUID) {
+        guard let workspace = workspaces.workspace(for: connectionId) else { return }
+        guard workspace.phase != next else { return }
+        workspace.phase = next
+        if workspaces.selectedConnectionId == connectionId {
+            applyPhase()
+        } else {
+            SessionRecoveryTracker.sync()
+        }
+    }
+
     internal func refreshFromActiveSessions() {
         handleConnectionStatusChange()
     }
 
+    /// Closing the window closes every connection it hosts, so each workspace has to reach
+    /// `.closing` on its own. Leaving a background one behind would let it keep a restore
+    /// intent for a window that no longer exists.
     internal func markWindowClosing() {
-        phase = ConnectionWindowPhaseMachine.onWindowClosing(phase: phase)
+        for workspace in workspaces.workspaces {
+            workspace.phase = ConnectionWindowPhaseMachine.onWindowClosing(phase: workspace.phase)
+        }
+        applyPhase()
     }
 
     internal var retainsRestoreIntent: Bool {
-        ConnectionWindowPhaseMachine.retainsRestoreIntent(phase: phase)
+        workspaces.workspaces.contains { $0.retainsRestoreIntent }
+    }
+
+    internal var connectionIdsRetainingRestoreIntent: [UUID] {
+        workspaces.workspaces.filter(\.retainsRestoreIntent).map(\.connectionId)
     }
 
     // MARK: - Pane Construction
@@ -407,8 +577,11 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
                 SharedSidebarState.forConnection(currentSession.connection.id)
             )
         }
+        switchTrace?.stage("sidebarPane")
         detailHosting.rootView = AnyView(buildDetailView())
+        switchTrace?.stage("detailPane")
         inspectorHosting.rootView = AnyView(buildInspectorView())
+        switchTrace?.stage("inspectorPane")
     }
 
     /// The command surface every menu action forwards into. Menu items reach this
@@ -444,11 +617,18 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
         payloadConnection ?? currentSession?.connection
     }
 
+    /// Keyed by connection for the same reason the detail pane is. A window shows one of several
+    /// connections now, so a pane can be asked to change connection in place, and SwiftUI updates a
+    /// view of unchanged type rather than rebuilding it. `SidebarView` keeps its `SidebarViewModel`
+    /// in `@State`, and a `State` initial value is discarded on an update, so the sidebar went on
+    /// answering from the previous connection's view model: its database type, its capabilities and
+    /// its filter caches, under the new connection's name.
     @ViewBuilder
     private func buildSidebarView() -> some View {
         if currentPane == .content, let currentSession, let sessionState {
             sidebarBody(currentSession: currentSession, sessionState: sessionState)
                 .transaction { $0.animation = nil }
+                .id(currentSession.connection.id)
         } else {
             Color.clear
         }
@@ -462,16 +642,6 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
         SidebarView(
             sidebarState: SharedSidebarState.forConnection(currentSession.connection.id),
             windowState: sessionState.coordinator.windowSidebarState,
-            onDoubleClick: { [weak self] table in
-                guard let coordinator = self?.sessionState?.coordinator else { return }
-                let activeTab = coordinator.tabManager.selectedTab
-                if activeTab?.tabType == .table, activeTab?.tableContext.tableName == table.name {
-                    coordinator.promotePreviewTab()
-                    coordinator.requestGridFocus()
-                } else {
-                    coordinator.openTableTab(table, forceNonPreview: true, activateGridFocus: true)
-                }
-            },
             pendingTruncates: sessionPendingTruncatesBinding,
             pendingDeletes: sessionPendingDeletesBinding,
             tableOperationOptions: sessionTableOperationOptionsBinding,
@@ -510,6 +680,11 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
                 toolbarState: sessionState.toolbarState,
                 coordinator: sessionState.coordinator
             )
+            /// The detail pane is a different view per connection, not one view whose inputs
+            /// changed. Without an identity its `@State` (whether tabs have been restored, the
+            /// cached change manager, the window id) survives a workspace switch, so the second
+            /// connection either never restores or overwrites its live tabs with a disk snapshot.
+            .id(currentSession.connection.id)
             .transaction { $0.animation = nil }
         } else {
             Color.clear
@@ -524,6 +699,7 @@ internal final class MainSplitViewController: NSSplitViewController, InspectorVi
                 connection: currentSession.connection
             )
             .environment(\.commandActions, commandActions)
+            .id(currentSession.connection.id)
         } else {
             Color.clear
         }

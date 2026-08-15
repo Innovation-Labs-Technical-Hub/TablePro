@@ -18,6 +18,33 @@ extension MainSplitViewController {
         commandActions?.saveFileAs()
     }
 
+    /// New Tab and Close Tab used to run AppKit's own `newWindowForTab:` and `performClose:`,
+    /// which named windows because a tab was a window. They act on the tab list now, so the
+    /// menu and the strip's own controls cannot disagree.
+    @objc func newEditorTab(_ sender: Any?) {
+        commandActions?.newTab()
+    }
+
+    /// A connecting or failed pane has no command surface, so Cmd+W closes the connection
+    /// itself. Leaving it to `commandActions` made the shortcut inert on exactly the pane a
+    /// user most wants to dismiss.
+    @objc func closeEditorTab(_ sender: Any?) {
+        guard let actions = commandActions else {
+            guard let connectionId = workspaces.selectedConnectionId else { return }
+            WindowManager.shared.closeWindow(for: connectionId)
+            return
+        }
+        actions.closeTab()
+    }
+
+    @objc func selectNextEditorTab(_ sender: Any?) {
+        commandActions?.selectTab(offsetBy: 1)
+    }
+
+    @objc func selectPreviousEditorTab(_ sender: Any?) {
+        commandActions?.selectTab(offsetBy: -1)
+    }
+
     @objc func closeOtherTabs(_ sender: Any?) {
         commandActions?.closeOtherTabs()
     }
