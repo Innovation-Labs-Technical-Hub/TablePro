@@ -59,6 +59,8 @@ To decide whether an unexpected failing suite is yours, grep its file for the sy
 
 Run tests early rather than saving them for the end, so a wedged host does not block the handoff.
 
+**Every follow-up PR gets this whole playbook too.** A collateral fix nobody asked for is the one most likely to be judged on its rigour, and shipping it unverified is worse than not shipping it. Build, test the touched suites, lint, and add its own CHANGELOG entry before opening it.
+
 ## UI tests
 
 `TableProUITests` is a separate target and a separate gate. A change to a user flow needs UI automation where the flow runs deterministically; if it cannot, say why in the PR description.
@@ -115,7 +117,12 @@ The checkout can move between turns, and uncommitted edits to tracked files are 
 
 ## Before the commit
 
-- Run `Skill(code-review)` over the diff and act on what it finds.
+- Run `Skill(code-review)` over the diff and act on what it finds. Its findings on the lines you just wrote matter as much as its findings on old code.
+- **Confirm the CHANGELOG still has its headings:**
+  ```bash
+  grep -n '^## \[' CHANGELOG.md
+  ```
+  An `Edit` whose `new_string` drops the trailing context deletes the released version heading and silently folds that whole release into `[Unreleased]`. Release notes are auto-extracted from `[Unreleased]`, so the next release re-ships it. The diff looks small and the damage does not show up in a build.
 - Run the writing-style grep from `CLAUDE.md` on the staged diff and rewrite every hit that lands on an added line:
   ```bash
   git diff --cached -U0 | grep -nE '—|seamless|robust|comprehensive|intuitive|effortless|streamlined|leverage|elevate|delve|utilize|facilitate'

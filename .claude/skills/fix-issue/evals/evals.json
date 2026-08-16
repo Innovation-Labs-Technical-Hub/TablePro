@@ -1,6 +1,6 @@
 {
   "skill_name": "fix-issue",
-  "notes": "Plan-first skill. The graded output is the implementation blueprint each run produces, not committed code, so Phases 4 to 6 (implementation, verification, and the PR) are out of scope for these evals. with_skill runs follow SKILL.md and stop at the Phase 3 plan gate; baseline runs get the same prompt with no skill. Two prompts are symptom-only (no file or invariant named) to test whether the workflow rediscovers the cause; one is a bare GitHub issue number to test the fetch path. The orchestration expectations check the current Claude Code mechanics: three concurrent Agent calls in one message, no team tools, no Workflow tool.",
+  "notes": "Autonomous root-cause skill with no approval gate. The graded artifact is the investigation and the implementation blueprint each run produces, because grading committed code and live pull requests is out of scope for these evals; a with_skill run may legitimately continue past the blueprint into implementation, and that is not a failure. Grade the blueprint content wherever it appears in the transcript. with_skill runs follow SKILL.md; baseline runs get the same prompt with no skill. Two prompts are symptom-only (no file or invariant named) to test whether the investigation rediscovers the cause; one is a bare GitHub issue number to test the fetch path. The orchestration expectations check the current mechanics: the investigation runs through the Workflow tool, and the run never pauses to ask permission to proceed.",
   "evals": [
     {
       "id": 1,
@@ -8,15 +8,15 @@
       "source_issue": 1350,
       "input_mode": "chat-symptom-only",
       "prompt": "In TablePro, the Active Connections panel dims the background when it opens but I can't tell how to close it. There's no close button anywhere. Make it dismiss properly, the native macOS way.",
-      "expected_output": "A blueprint that locates the Active Connections sheet (ConnectionSwitcherSheet.swift), cites macOS HIG conventions for dismissing a sheet or panel, and covers all three dismissal paths from the issue: a visible close control, Escape, and click-outside. Stops at the plan gate for approval rather than editing.",
+      "expected_output": "A blueprint that locates the Active Connections sheet (ConnectionSwitcherSheet.swift), cites macOS HIG conventions for dismissing a sheet or panel, and covers all three dismissal paths from the issue: a visible close control, Escape, and click-outside. The run proceeds on its own rather than asking whether to implement.",
       "files": [],
       "expectations": [
         "Identifies the Active Connections sheet component (ConnectionSwitcherSheet.swift or equivalent) as the place to fix",
         "Cites a specific macOS HIG convention or native dismissal API (e.g. SwiftUI dismiss, sheet/NSPanel, Escape via cancelAction) rather than inventing an approach",
         "Addresses the full scope of dismissal, not just adding a button: visible close control AND Escape AND click-outside",
         "States the root cause (no dismissal affordance) distinctly from the symptom",
-        "Spawns the three investigators as concurrent Agent calls in a single message, and uses no team tools and no Workflow tool",
-        "Presents a plan and pauses for approval before implementing, instead of immediately writing code",
+        "Runs the investigation through the Workflow tool rather than ad-hoc one-off searches, and does not enter plan mode",
+        "Proceeds from blueprint to implementation without pausing to ask the user for approval or confirmation",
         "Plan includes a CHANGELOG entry, a unit test, and TableProUITests automation for the dismissal flow"
       ]
     },
@@ -34,8 +34,9 @@
         "Explains the root cause: why selection replaces the tab initially but opens new tabs after a second tab exists",
         "Proposes one consistent rule (single-click reuses or replaces the preview tab; explicit action opens a new tab), referencing native preview-tab UX from Xcode, Finder, or a competitor client including TablePlus",
         "Makes an explicit refactor-vs-patch decision rather than bolting on a special case",
-        "Challenges the blueprint with a code-architect pass, since the change touches a documented invariant",
-        "Presents a plan and pauses for approval before implementing"
+        "Attacks its own blueprint with a challenge pass, since the change touches a documented invariant",
+        "Keeps a register of any defect found in the tab or coordinator subsystem that is not the reported bug, and treats it as its own follow-up pull request rather than future work",
+        "Proceeds without pausing for approval"
       ]
     },
     {
@@ -47,12 +48,12 @@
       "expected_output": "A blueprint that fetches the issue, traces raw SQL filter completion (FilterCoordinator plus the CompletionEngine and SQL context analysis), identifies that completion only fires for the leading token instead of re-running per clause, and proposes column completion at every column-valid position (after AND and OR), with tests.",
       "files": [],
       "expectations": [
-        "Fetches the GitHub issue content with gh before planning",
+        "Fetches the GitHub issue content with gh before investigating",
         "Traces completion through FilterCoordinator and the CompletionEngine or SQL context analyzer with file evidence",
         "States the root cause as completion firing only for the leading token or not re-running per clause, not a surface workaround",
         "Covers the full scope: column completion at every valid position including after AND and OR, not only after AND",
         "Specifies a test that exercises completion after AND and OR in the raw SQL filter",
-        "Presents a plan and pauses for approval before implementing"
+        "Proceeds without pausing for approval"
       ]
     }
   ]

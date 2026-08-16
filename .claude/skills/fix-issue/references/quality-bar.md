@@ -21,7 +21,15 @@ Choose **targeted patch** when:
 - The design is sound and the bug is a genuine local mistake: an off-by-one, a missing guard, a wrong comparison.
 - A small change fully resolves the root cause without distorting the surrounding code.
 
-The failure mode to avoid is patching a symptom: making the reported case disappear while the underlying cause stays. The user's standing preference is the complete, root-cause fix grounded in documented APIs, never a phased or quick-win version offered as the answer. Do not present a minimal stopgap alongside the real fix as if they were equal options.
+The failure mode to avoid is patching a symptom: making the reported case disappear while the underlying cause stays. The user's standing preference is the complete, root-cause fix grounded in documented APIs, never a phased or quick-win version offered as the answer. Do not present a minimal stopgap alongside the real fix as if they were equal options, and do not stop to ask which one to build.
+
+The second failure mode is believing the wrong thing confidently. Where the correct behaviour depends on a dependency, a C library, or a system framework, measure it against the artifact we ship before designing on top of it. A probe that takes ten minutes has overturned claims that three independent investigators agreed on.
+
+## Collateral findings
+
+A fix is judged on the subsystem it leaves behind, not only on the symptom it closes. **An investigation that finds three defects and fixes one has failed at the part that mattered most.**
+
+Anything real that the investigation turns up and that is not the reported bug is either scope for the primary PR (when shipping without it would leave the same class of bug latent) or its own follow-up PR, opened in the same session without asking. SKILL.md Phase 6 holds the bar a finding must clear and the rules for shipping them. Two things it will not accept as findings: style preferences, and claims that never got verified.
 
 ## Native and HIG
 
