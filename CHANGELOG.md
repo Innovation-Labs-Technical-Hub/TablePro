@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A DuckDB table in the default schema is titled `orders` again rather than `main.orders`, and exports preselect the schema you are browsing.
 - **File > Save As...** stayed available on a table, structure or diagram tab, and **File > Export > Export Results...** stayed available with no rows to export. Both did nothing when chosen. They are dimmed now until they can run.
 - Clearing query history from the drawer promised to delete the connection's history while the source filter was quietly sparing table browsing, row edits, imports and AI queries. The confirmation now says what it will actually delete, and clearing itself is unchanged.
+- A query history database TablePro cannot open showed as "No Query History", which reads as though nothing had ever been recorded. The drawer now says the store could not be opened and that your history is still on disk.
 
 ### Changed
 
