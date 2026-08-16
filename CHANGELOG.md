@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The row highlighted when the connection switcher, the database switcher or the query history drawer first opens kept its dark text on the blue selection fill. It was only readable after moving the selection off the row and back. (#2140)
 - The query history drawer kept re-reading history in the background after you closed it, once for every statement recorded, for as long as the window stayed open. A closed drawer now does nothing, and one that starts closed does not load until you open it.
 - Query History's "Load in Editor" and "Run in New Tab" did nothing when clicked. Both work again, from the buttons, the right-click menu, and `Return` or a double-click on a row.
 - "Run in New Tab" runs the query it opens, and asks first when that query writes, even with safe mode set to Silent.
