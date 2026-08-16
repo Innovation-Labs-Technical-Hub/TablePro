@@ -10,9 +10,6 @@
   "enableWorkflows": true,
   "workflowKeywordTriggerEnabled": true,
   "workflowSizeGuideline": "unrestricted",
-  "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
-  },
   "enabledPlugins": {
     "feature-dev@claude-plugins-official": true,
     "codex@openai-codex": true
