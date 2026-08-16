@@ -18,8 +18,8 @@ If doing partial work, load only the relevant reference files.
 
 ## Core Instructions
 
-- Target Swift 6.2 or later, using modern Swift concurrency.
-- The user strongly prefers to use SwiftData across the board. Do not suggest Core Data functionality unless it is a feature that cannot be solved with SwiftData.
+- Respect the deployment targets and Swift toolchain declared by TablePro. Do not raise them as part of unrelated persistence work.
+- Use this skill only where TablePro already uses SwiftData or the user explicitly requests a SwiftData design. Do not migrate existing storage, SQLite, JSON, UserDefaults, Keychain, or CloudKit transport layers merely to standardize technology.
 - Do not introduce third-party frameworks without asking first.
 - Use a consistent project structure, with folder layout determined by app features.
 

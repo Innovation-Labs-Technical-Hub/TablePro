@@ -1,6 +1,6 @@
 {
   "skill_name": "fix-issue",
-  "notes": "Autonomous root-cause skill with no approval gate. The graded artifact is the investigation and the implementation blueprint each run produces, because grading committed code and live pull requests is out of scope for these evals; a with_skill run may legitimately continue past the blueprint into implementation, and that is not a failure. Grade the blueprint content wherever it appears in the transcript. with_skill runs follow SKILL.md; baseline runs get the same prompt with no skill. Two prompts are symptom-only (no file or invariant named) to test whether the investigation rediscovers the cause; one is a bare GitHub issue number to test the fetch path. The orchestration expectations check the current mechanics: the investigation runs through the Workflow tool, and the run never pauses to ask permission to proceed.",
+  "notes": "Autonomous root-cause skill with no approval gate. The graded artifact is the investigation and implementation blueprint each run produces because committed code and live pull requests are outside these evals. A with_skill run may continue into implementation; grade the blueprint wherever it appears. with_skill runs follow SKILL.md; baseline runs receive the same prompt without the skill. Two prompts are symptom-only to test root-cause discovery, and one is a bare GitHub issue number to test issue retrieval. Claude runs use ultracode dynamic workflow orchestration with independent evidence lanes and do not pause for routine approval.",
   "evals": [
     {
       "id": 1,
@@ -15,7 +15,7 @@
         "Cites a specific macOS HIG convention or native dismissal API (e.g. SwiftUI dismiss, sheet/NSPanel, Escape via cancelAction) rather than inventing an approach",
         "Addresses the full scope of dismissal, not just adding a button: visible close control AND Escape AND click-outside",
         "States the root cause (no dismissal affordance) distinctly from the symptom",
-        "Runs the investigation through the Workflow tool rather than ad-hoc one-off searches, and does not enter plan mode",
+        "Runs independent investigation lanes through ultracode dynamic workflow orchestration rather than relying only on ad-hoc searches",
         "Proceeds from blueprint to implementation without pausing to ask the user for approval or confirmation",
         "Plan includes a CHANGELOG entry, a unit test, and TableProUITests automation for the dismissal flow"
       ]
@@ -26,16 +26,16 @@
       "source_issue": 1348,
       "input_mode": "chat-symptom-only",
       "prompt": "When I click a table in the sidebar, the behaviour is inconsistent. The first click replaces the current tab, but once I've opened a second tab, clicking another table keeps opening brand-new tabs instead of replacing the active one. It should be predictable. Fix it properly so it behaves like a native macOS app would.",
-      "expected_output": "A blueprint that traces openTableTab in MainContentCoordinator+Navigation, rediscovers the tab replacement guard invariant documented in CLAUDE.md, explains why the branch flips after the second tab, and proposes one consistent preview-tab rule (single-click reuses or replaces the active preview tab; an explicit action opens a new tab) matching native preview-tab UX.",
+      "expected_output": "A blueprint that traces openTableTab in MainContentCoordinator+Navigation, rediscovers the tab replacement guard invariant in the shared TablePro project guide, explains why the branch flips after the second tab, and proposes one consistent preview-tab rule (single-click reuses or replaces the active preview tab; an explicit action opens a new tab) matching native preview-tab UX.",
       "files": [],
       "expectations": [
         "Traces the cause to openTableTab in MainContentCoordinator+Navigation (or the table-selection path) with file evidence",
-        "Surfaces the tab replacement guard invariant from CLAUDE.md, or otherwise explains the preview-tab vs new-tab branch precisely",
+        "Surfaces the tab replacement guard invariant from the shared project guide, or otherwise explains the preview-tab vs new-tab branch precisely",
         "Explains the root cause: why selection replaces the tab initially but opens new tabs after a second tab exists",
         "Proposes one consistent rule (single-click reuses or replaces the preview tab; explicit action opens a new tab), referencing native preview-tab UX from Xcode, Finder, or a competitor client including TablePlus",
         "Makes an explicit refactor-vs-patch decision rather than bolting on a special case",
         "Attacks its own blueprint with a challenge pass, since the change touches a documented invariant",
-        "Keeps a register of any defect found in the tab or coordinator subsystem that is not the reported bug, and treats it as its own follow-up pull request rather than future work",
+        "Keeps a register of defects found outside the reported scope and reports them separately without silently expanding the change or opening a pull request",
         "Proceeds without pausing for approval"
       ]
     },

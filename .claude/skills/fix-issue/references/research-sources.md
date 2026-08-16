@@ -26,7 +26,7 @@ There are no MCP servers configured in this repo. Everything below is a built-in
 
 - **Human Interface Guidelines**: `https://developer.apple.com/design/human-interface-guidelines`. The macOS sections on windows, panels, sheets, toolbars, sidebars, menus, tables and lists, and selection are the usual ones for a database client. Quote the specific guideline. "The HIG says so" without a citation is not evidence.
 - **AppKit**: `https://developer.apple.com/documentation/appkit`. Native windows, sheets, `NSToolbar`, `NSTableView` and `NSOutlineView`, `NSWindow` tabbing, the responder chain, menus, `NSViewController`.
-- **SwiftUI**: `https://developer.apple.com/documentation/swiftui`. TablePro is SwiftUI-first with AppKit where SwiftUI falls short. Check whether a native SwiftUI modifier already does the job before dropping to AppKit, and check the reverse too: several TablePro views are AppKit precisely because the SwiftUI equivalent misbehaves, and `CLAUDE.md` records why.
+- **SwiftUI**: `https://developer.apple.com/documentation/swiftui`. TablePro is SwiftUI-first with AppKit where SwiftUI falls short. Check whether a native SwiftUI modifier already does the job before dropping to AppKit, and check the reverse too: several TablePro views are AppKit precisely because the SwiftUI equivalent misbehaves. `AGENTS.md` and the shared project guide record those constraints.
 - **Deprecations matter.** Name the modern API. If the only documented option is deprecated, say so and note the replacement.
 - **Availability matters.** TablePro targets macOS 14. An API introduced in 15 or 26 needs an `if #available` branch and a fallback, and the blueprint has to say what the fallback is.
 

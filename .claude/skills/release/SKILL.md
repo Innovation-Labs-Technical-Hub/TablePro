@@ -60,8 +60,8 @@ fails, stop and tell the user what's wrong.
    block) if not on `main`.
 
 8. **SwiftLint passes** — run `swiftlint lint --strict`. If there are
-   any warnings or errors, spawn a Task subagent to fix all issues
-   before continuing with the release. The subagent should run
+   any warnings or errors caused by the release diff, delegate a focused
+   lint investigation before continuing with the release. The investigator should run
    `swiftlint --fix` first, then manually fix any remaining issues,
    and verify with `swiftlint lint --strict` until clean.
 
