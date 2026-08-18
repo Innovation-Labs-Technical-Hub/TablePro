@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- The Quick Switcher said "No results" while it was still loading. Opening it on a remote connection and typing before the object list arrived reported that nothing matched, then filled in a moment later. It now says it is loading, both while the object list is being fetched and while a search is being ranked.
 - A toolbar button now shows the shortcut you actually bound. Rebinding a shortcut in **Settings** > **Keyboard** reached the menu bar but not the toolbar, so a button's tooltip and its overflow menu kept advertising the original key, and the Connection button advertised a key it never had. The Database and Preview buttons also lost their shortcut hint entirely whenever you switched connection. (#2185)
 - JSON results, Copy as JSON and JSON export no longer crash on unsigned or wider-than-64-bit integer values. Large integers and high-precision decimals keep every digit, whichever spelling the database returned them in, instead of being narrowed through floating-point conversion.
 - JSON export could write a file that was not valid JSON when a numeric column held a value such as `Infinity` or digits outside 0-9. Those values are quoted as strings now.
