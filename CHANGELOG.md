@@ -16,11 +16,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- The Quick Switcher is now called **Open Quickly** and lives in the **File** menu under Open File, the name and place macOS uses for jumping straight to something by name. The keyboard shortcut is unchanged at `Cmd+Shift+O`, and it is still rebindable in **Settings** > **Keyboard**. (#2185)
+- `Cmd+Return` opens the selected item in a new tab in Open Quickly, alongside the `Option+Return` that already did. (#2185)
 - When a connection fails because a sign-in expired, TablePro now offers to sign in again and reconnects for you, instead of leaving you on an error screen whose only button repeats the same failure. This covers Microsoft Entra ID and AWS SSO, on the connection itself as well as in the connection form's Test button.
 - The editor tab bar moved into the window chrome below the toolbar, where macOS puts its own, and it lines up with the content pane instead of spanning the whole window. Its tabs sit in a filled track rather than floating on the window background, and the selected tab is drawn raised out of that track instead of ringed by a shadow. The bar still appears only once a connection has a second tab.
 
 ### Fixed
 
+- A toolbar button now shows the shortcut you actually bound. Rebinding a shortcut in **Settings** > **Keyboard** reached the menu bar but not the toolbar, so a button's tooltip and its overflow menu kept advertising the original key, and the Connection button advertised a key it never had. The Database and Preview buttons also lost their shortcut hint entirely whenever you switched connection. (#2185)
 - JSON results, Copy as JSON and JSON export no longer crash on unsigned or wider-than-64-bit integer values. Large integers and high-precision decimals keep every digit, whichever spelling the database returned them in, instead of being narrowed through floating-point conversion.
 - JSON export could write a file that was not valid JSON when a numeric column held a value such as `Infinity` or digits outside 0-9. Those values are quoted as strings now.
 - Text pasted into the query editor could stay the wrong colour for the rest of the session, showing as plain text while everything around it kept its syntax highlighting. This happened when the editor had to abandon a parse partway through, which it does for a large paste. (#2172)
