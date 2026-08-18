@@ -86,7 +86,6 @@ internal enum QuickSwitcherScope: String, CaseIterable, Identifiable, Sendable {
         case .connections: return String(localized: "Connections")
         }
     }
-
 }
 
 /// A single item in the quick switcher results list

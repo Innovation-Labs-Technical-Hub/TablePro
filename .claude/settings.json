@@ -4,12 +4,6 @@
     "pr": ""
   },
   "includeCoAuthoredBy": false,
-  "model": "opus",
-  "effortLevel": "xhigh",
-  "ultracode": true,
-  "enableWorkflows": true,
-  "workflowKeywordTriggerEnabled": true,
-  "workflowSizeGuideline": "unrestricted",
   "enabledPlugins": {
     "feature-dev@claude-plugins-official": true,
     "codex@openai-codex": true
