@@ -1,6 +1,12 @@
 import Foundation
 import TableProPluginKit
 
+struct DatabaseTreeObjectGroup: Hashable, Sendable {
+    let database: String
+    let schema: String?
+    let kind: SidebarObjectKind
+}
+
 enum SidebarObjectKind: String, CaseIterable, Sendable, Hashable {
     case table
     case view
@@ -31,6 +37,14 @@ enum SidebarObjectKind: String, CaseIterable, Sendable, Hashable {
         }
     }
 
+    /// A plugin names its own table equivalent, so a Mongo tree says Collections where a Postgres
+    /// one says Tables. Every other kind keeps the app's name. The row, its menu and type-select all
+    /// have to agree, which is why they ask here instead of each spelling the rule out.
+    func title(tableEntityName: String?) -> String {
+        guard self == .table, let tableEntityName else { return pluralDisplayName }
+        return tableEntityName
+    }
+
     var iconName: String {
         switch self {
         case .table:            return "tablecells"
@@ -54,5 +68,26 @@ enum SidebarObjectKind: String, CaseIterable, Sendable, Hashable {
 
     var isRoutine: Bool {
         self == .procedure || self == .function
+    }
+
+    static func resolve(tableType: TableInfo.TableType) -> SidebarObjectKind {
+        switch tableType.rawValue {
+        case "VIEW":              return .view
+        case "MATERIALIZED VIEW": return .materializedView
+        case "FOREIGN TABLE":     return .foreignTable
+        default:                  return .table
+        }
+    }
+
+    var isExpandedByDefault: Bool {
+        self == .table
+    }
+
+    /// The flat list's rule for a fixed section, which exists as chrome before its contents do. The
+    /// tree builds its groups from what a container holds, so it does not ask this.
+    func shouldRender(itemCount: Int, capabilities: PluginCapabilities) -> Bool {
+        if self == .table { return true }
+        if let capabilityFlag, !capabilities.contains(capabilityFlag) { return false }
+        return itemCount > 0
     }
 }

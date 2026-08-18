@@ -10,9 +10,9 @@
 //
 
 import Foundation
+@testable import TablePro
 import TableProPluginKit
 import Testing
-@testable import TablePro
 
 @MainActor
 struct WindowSidebarStateTests {
@@ -86,6 +86,26 @@ struct WindowSidebarStateTests {
         #expect(restored.expandedTreeTables == [orders])
     }
 
+    @Test("Object group expansion defaults by kind and persists per scope")
+    func objectGroupExpansionPersistsPerScope() throws {
+        let defaults = try makeDefaults()
+        let connectionId = UUID()
+        let publicTables = DatabaseTreeObjectGroup(database: "shop", schema: "public", kind: .table)
+        let auditTables = DatabaseTreeObjectGroup(database: "shop", schema: "audit", kind: .table)
+        let publicViews = DatabaseTreeObjectGroup(database: "shop", schema: "public", kind: .view)
+
+        let state = WindowSidebarState(connectionId: connectionId, defaults: defaults)
+        #expect(state.isTreeObjectGroupExpanded(publicTables))
+        #expect(state.isTreeObjectGroupExpanded(publicViews) == false)
+        state.setTreeObjectGroup(publicTables, expanded: false)
+        state.setTreeObjectGroup(publicViews, expanded: true)
+
+        let restored = WindowSidebarState(connectionId: connectionId, defaults: defaults)
+        #expect(restored.isTreeObjectGroupExpanded(publicTables) == false)
+        #expect(restored.isTreeObjectGroupExpanded(auditTables))
+        #expect(restored.isTreeObjectGroupExpanded(publicViews))
+    }
+
     @Test("A schema-less table key stays distinct from a schema-qualified one")
     func partitionedTableKeysDistinguishSchema() throws {
         let defaults = try makeDefaults()
@@ -115,6 +135,7 @@ struct WindowSidebarStateTests {
         #expect(restored.expandedTreeDatabases == ["shop"])
         #expect(restored.expandedTreeSchemas == ["public"])
         #expect(restored.expandedTreeTables.isEmpty)
+        #expect(restored.treeObjectGroupExpansion.isEmpty)
     }
 
     @Test("Collapsing every partitioned table clears storage alongside the rest")
@@ -128,6 +149,33 @@ struct WindowSidebarStateTests {
 
         let restored = WindowSidebarState(connectionId: connectionId, defaults: defaults)
         #expect(restored.expandedTreeTables.isEmpty)
+    }
+
+    /// Object kinds are an open set, so a build that has never heard of one still has to read the
+    /// rest of the blob. Decoding the kind as an enum threw and took every other expansion set with
+    /// it, including the seed flag, which reopened containers the user had closed.
+    @Test("An unrecognized object kind does not discard the rest of the expansion")
+    func unknownObjectKindKeepsOtherExpansion() throws {
+        let defaults = try makeDefaults()
+        let connectionId = UUID()
+        let stored = """
+        {"schemas":["public"],"databases":["shop"],"databaseSchemas":[],"tables":[],\
+        "objectGroups":[{"database":"shop","schema":"public","kind":"sequence","expanded":true},\
+        {"database":"shop","schema":"public","kind":"view","expanded":true}],"seeded":true}
+        """
+        defaults.set(Data(stored.utf8), forKey: "com.TablePro.sidebar.treeExpansion.\(connectionId.uuidString)")
+
+        let restored = WindowSidebarState(connectionId: connectionId, defaults: defaults)
+
+        #expect(restored.expandedTreeDatabases == ["shop"])
+        #expect(restored.expandedTreeSchemas == ["public"])
+        #expect(restored.didSeedExpansion)
+        #expect(restored.treeObjectGroupExpansion.count == 1)
+        #expect(
+            restored.isTreeObjectGroupExpanded(
+                DatabaseTreeObjectGroup(database: "shop", schema: "public", kind: .view)
+            )
+        )
     }
 
     @Test("A window without a connection does not persist")

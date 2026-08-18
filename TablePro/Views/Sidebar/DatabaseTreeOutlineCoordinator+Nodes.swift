@@ -44,6 +44,8 @@ extension DatabaseTreeOutlineCoordinator {
             return ref.table.type == .partitionedTable ? partitionNodes(of: ref) : []
         case .objectKindSection(let kind):
             return flatObjectNodes(for: kind)
+        case .containerObjectKindSection(let group):
+            return containerObjectNodes(for: group)
         case .hierarchicalSchemaSection(let schema):
             return hierarchicalTableNodes(schema: schema)
         case .redisKeysSection:
@@ -285,16 +287,23 @@ extension DatabaseTreeOutlineCoordinator {
         }
     }
 
+    private func objectBuckets(database: String, schema: String?) -> DatabaseTreeObjectBuckets {
+        let key = DatabaseTreeContainerKey(database: database, schema: schema, searchText: searchText)
+        if let cached = objectBucketsCache[key] { return cached }
+        let buckets = DatabaseTreeFilter.objectBuckets(
+            tables: service.tables(connectionId: connectionId, database: database, schema: schema),
+            routines: service.routines(connectionId: connectionId, database: database, schema: schema),
+            searchText: searchText
+        )
+        objectBucketsCache[key] = buckets
+        return buckets
+    }
+
     private func loadedObjectNodes(database: String, schema: String?, parentId: String) -> [DatabaseTreeNode] {
-        let tables = DatabaseTreeFilter.filteredTables(
-            service.tables(connectionId: connectionId, database: database, schema: schema), searchText: searchText
-        )
-        let routines = DatabaseTreeFilter.filteredRoutines(
-            service.routines(connectionId: connectionId, database: database, schema: schema), searchText: searchText
-        )
+        let buckets = objectBuckets(database: database, schema: schema)
         let routinesState = service.routinesLoadState(connectionId: connectionId, database: database, schema: schema)
 
-        guard !tables.isEmpty || !routines.isEmpty else {
+        guard !buckets.isEmpty else {
             switch routinesState {
             case .failed(let message): return [statusNode(parentId: parentId, status: .error(message))]
             case .loaded: return [statusNode(parentId: parentId, status: .empty)]
@@ -302,18 +311,46 @@ extension DatabaseTreeOutlineCoordinator {
             }
         }
 
-        var nodes: [DatabaseTreeNode] = tables.map { table in
-            let ref = DatabaseTreeTableRef(database: database, schema: schema, table: table)
-            return node(id: DatabaseTreeNode.tableId(ref), kind: .table(ref))
-        }
-        nodes += routines.map { routine in
-            let ref = DatabaseTreeRoutineRef(database: database, schema: schema, routine: routine)
-            return node(id: DatabaseTreeNode.routineId(ref), kind: .routine(ref))
+        let groups = DatabaseTreeObjectGroupResolver.groups(
+            database: database,
+            schema: schema,
+            itemCounts: buckets.itemCounts
+        )
+        var nodes = groups.map { group in
+            node(
+                id: DatabaseTreeNode.containerObjectKindSectionId(group),
+                kind: .containerObjectKindSection(group)
+            )
         }
         if case .failed(let message) = routinesState {
             nodes.append(statusNode(parentId: parentId, status: .error(message)))
         }
         return nodes
+    }
+
+    private func containerObjectNodes(for group: DatabaseTreeObjectGroup) -> [DatabaseTreeNode] {
+        let buckets = objectBuckets(database: group.database, schema: group.schema)
+        if group.kind.isRoutine {
+            let routines = buckets.routines[group.kind] ?? []
+            guard !routines.isEmpty else {
+                return [statusNode(parentId: DatabaseTreeNode.containerObjectKindSectionId(group), status: .empty)]
+            }
+            return routines.map { routine in
+                let ref = DatabaseTreeRoutineRef(
+                    database: group.database, schema: group.schema, routine: routine
+                )
+                return node(id: DatabaseTreeNode.routineId(ref), kind: .routine(ref))
+            }
+        }
+
+        let tables = buckets.tables[group.kind] ?? []
+        guard !tables.isEmpty else {
+            return [statusNode(parentId: DatabaseTreeNode.containerObjectKindSectionId(group), status: .empty)]
+        }
+        return tables.map { table in
+            let ref = DatabaseTreeTableRef(database: group.database, schema: group.schema, table: table)
+            return node(id: DatabaseTreeNode.tableId(ref), kind: .table(ref))
+        }
     }
 
     private func statusNode(parentId: String, status: DatabaseTreeNode.Status) -> DatabaseTreeNode {

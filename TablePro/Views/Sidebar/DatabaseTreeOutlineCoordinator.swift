@@ -32,13 +32,19 @@ final class DatabaseTreeOutlineCoordinator: NSObject {
 
     internal var nodeCache: [String: DatabaseTreeNode] = [:]
     internal var childrenCache: [String: [DatabaseTreeNode]] = [:]
+    internal var objectBucketsCache: [DatabaseTreeContainerKey: DatabaseTreeObjectBuckets] = [:]
     private var cachedRowContext: DatabaseTreeRowContext?
     private var cachedRowActions: DatabaseTreeRowActions?
     private var lastSelection: Set<DatabaseTreeTableRef> = []
     private var lastSelectedNodeIds: [String] = []
     private var publishedTables: Set<TableInfo> = []
+    private var publishedSelectionDatabase: String?
+    private var isModelSelectionAdoptionPending = false
+    private var openSelectionDepth = 0
     private var pendingOpenWork: DispatchWorkItem?
     internal var isApplyingExpansion = false
+    private var isSelectionSyncScheduled = false
+    private var isCollapsingItem = false
     private var isSyncingSelection = false
     private var isReloading = false
     private var hasRenderedOnce = false
@@ -193,7 +199,8 @@ final class DatabaseTreeOutlineCoordinator: NSObject {
                     connectionId: connectionId, database: ref.database, schema: ref.schema, table: ref.table.name
                 )
             case .recentSection, .recentTable, .table, .routine, .status,
-                 .objectKindSection, .redisKeysSection, .redisNode:
+                 .objectKindSection, .containerObjectKindSection,
+                 .redisKeysSection, .redisNode:
                 break
             }
         }
@@ -203,6 +210,7 @@ final class DatabaseTreeOutlineCoordinator: NSObject {
         guard let outlineView else { return }
         isReloading = true
         childrenCache.removeAll()
+        objectBucketsCache.removeAll()
         invalidateRowConfiguration()
         outlineView.reloadData()
         applyDesiredExpansion()
@@ -275,7 +283,7 @@ final class DatabaseTreeOutlineCoordinator: NSObject {
         }
     }
 
-    private func syncSelectionToModel() {
+    internal func syncSelectionToModel() {
         guard let outlineView else { return }
         adoptModelSelection()
         let rows = lastSelectedNodeIds.compactMap { nodeId -> Int? in
@@ -297,19 +305,46 @@ final class DatabaseTreeOutlineCoordinator: NSObject {
     ///
     /// A table can be drawn twice, once under Recent and once in its own section. Only the section
     /// row is adopted, because that is the row the model's `TableInfo` stands for.
+    ///
+    /// Nothing is adopted while this coordinator is opening a row the user clicked. `activate(_:)`
+    /// moves the browse database before `publishSelection()` runs, so through that window the model
+    /// still names the previous database's table. Adopting it would deselect the clicked row and
+    /// then publish the empty selection over it. The depth counts, because a second click can land
+    /// while the first switch is still in flight.
     private func adoptModelSelection() {
-        guard let windowState, windowState.selectedTables != publishedTables else { return }
-        publishedTables = windowState.selectedTables
-        let nodes = nodeCache.values.filter { node in
-            guard case .table(let ref) = node.kind else { return false }
-            return publishedTables.contains(ref.table)
+        guard let windowState, openSelectionDepth == 0 else { return }
+        let selectedTables = windowState.selectedTables
+        let selectionDatabase = modelSelectionDatabase
+        guard selectedTables != publishedTables
+            || selectionDatabase != publishedSelectionDatabase
+            || isModelSelectionAdoptionPending
+        else { return }
+        publishedTables = selectedTables
+        publishedSelectionDatabase = selectionDatabase
+
+        var nodes: [DatabaseTreeNode] = []
+        for node in nodeCache.values {
+            guard case .table(let ref) = node.kind, selectedTables.contains(ref.table) else { continue }
+            guard selectionDatabase == nil || ref.database == selectionDatabase else { continue }
+            nodes.append(node)
         }
         lastSelectedNodeIds = nodes.map(\.id)
-        lastSelection = Set(DatabaseTreeSelection.tableRefs(of: Array(nodes)))
+        lastSelection = Set(DatabaseTreeSelection.tableRefs(of: nodes))
+        /// Still pending while a selected table has no row in the database being browsed: the row is
+        /// usually one that has not been built yet, and the next sync adopts it.
+        isModelSelectionAdoptionPending = Set(lastSelection.map(\.table)) != selectedTables
+    }
+
+    private var modelSelectionDatabase: String? {
+        if let browseDatabase = mainCoordinator?.browseDatabaseName, !browseDatabase.isEmpty { return browseDatabase }
+        guard let activeDatabase, !activeDatabase.isEmpty else { return nil }
+        return activeDatabase
     }
 
     private func open(_ ref: DatabaseTreeTableRef, activateGridFocus: Bool) {
+        openSelectionDepth += 1
         Task { @MainActor in
+            defer { openSelectionDepth -= 1 }
             await activate(ref)
             mainCoordinator?.openTableTab(ref.table, schema: ref.schema, activateGridFocus: activateGridFocus)
             publishSelection()
@@ -328,6 +363,8 @@ final class DatabaseTreeOutlineCoordinator: NSObject {
         let nodes = selectedNodes()
         let tables = DatabaseTreeSelection.tableInfos(of: nodes)
         publishedTables = tables
+        publishedSelectionDatabase = modelSelectionDatabase
+        isModelSelectionAdoptionPending = false
         /// The row count goes with the tables, because this is the one list that can select a row
         /// which is not a table. One table selected beside a schema must not read as a pick.
         windowState.select(tables: tables, rowCount: nodes.count)
@@ -427,9 +464,7 @@ final class DatabaseTreeOutlineCoordinator: NSObject {
                 )
             },
             objectKindTitle: { [databaseType] kind in
-                kind == .table
-                    ? PluginManager.shared.tableEntityName(for: databaseType)
-                    : kind.pluralDisplayName
+                kind.title(tableEntityName: PluginManager.shared.tableEntityName(for: databaseType))
             }
         )
     }
@@ -457,6 +492,25 @@ final class DatabaseTreeOutlineCoordinator: NSObject {
         case .procedure: Task { await mainCoordinator.refreshProcedures() }
         case .function: Task { await mainCoordinator.refreshFunctions() }
         case .table, .view, .materializedView, .foreignTable: Task { await mainCoordinator.refreshTables() }
+        }
+    }
+
+    internal func refreshContainerObjectKind(_ group: DatabaseTreeObjectGroup) {
+        let connectionId = connectionId
+        Task {
+            if group.kind.isRoutine {
+                await service.refreshRoutineObjects(
+                    connectionId: connectionId,
+                    database: group.database,
+                    schema: group.schema
+                )
+            } else {
+                await service.refreshTableObjects(
+                    connectionId: connectionId,
+                    database: group.database,
+                    schema: group.schema
+                )
+            }
         }
     }
 
@@ -538,7 +592,10 @@ extension DatabaseTreeOutlineCoordinator: NSOutlineViewDelegate {
         item: Any
     ) -> String? {
         guard let node = item as? DatabaseTreeNode else { return nil }
-        return DatabaseTreeTypeSelect.matchString(for: node.kind)
+        return DatabaseTreeTypeSelect.matchString(
+            for: node.kind,
+            tableEntityName: PluginManager.shared.tableEntityName(for: databaseType)
+        )
     }
 
     /// The load has to run before AppKit asks for the children, which is what `will` is for. The
@@ -551,12 +608,42 @@ extension DatabaseTreeOutlineCoordinator: NSOutlineViewDelegate {
 
     func outlineViewItemDidExpand(_ notification: Notification) {
         guard let node = notification.userInfo?["NSObject"] as? DatabaseTreeNode else { return }
-        if isRecordingExpansion { recordExpansion(node, expanded: true) }
+        if isRecordingExpansion {
+            recordExpansion(node, expanded: true)
+            restoreDescendantExpansion(afterExpanding: node)
+        }
+        scheduleSelectionSync()
+    }
+
+    private func scheduleSelectionSync(force: Bool = false) {
+        guard force || !isApplyingExpansion, !isSelectionSyncScheduled else { return }
+        isSelectionSyncScheduled = true
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.isSelectionSyncScheduled = false
+            self.isCollapsingItem = false
+            self.syncSelectionToModel()
+        }
+    }
+
+    /// A collapse that hides the selected row makes AppKit rewrite the outline's selection, and that
+    /// rewrite is not a pick. Publishing it wrote an empty `selectedTables` the tree could never take
+    /// back: an empty model against an empty published set leaves `adoptModelSelection()` nothing to
+    /// restore when the row comes back.
+    ///
+    /// AppKit posts that selection change outside the will/did pair, so the suppression is raised at
+    /// both ends and lowered a main-actor hop later, which is also when the highlight is driven back
+    /// from the model.
+    func outlineViewItemWillCollapse(_ notification: Notification) {
+        isCollapsingItem = true
     }
 
     func outlineViewItemDidCollapse(_ notification: Notification) {
-        guard let node = notification.userInfo?["NSObject"] as? DatabaseTreeNode else { return }
-        if isRecordingExpansion { recordExpansion(node, expanded: false) }
+        isCollapsingItem = true
+        if let node = notification.userInfo?["NSObject"] as? DatabaseTreeNode, isRecordingExpansion {
+            recordExpansion(node, expanded: false)
+        }
+        scheduleSelectionSync(force: true)
     }
 
     /// A filtered tree discloses whatever matches, so while the field has text the disclosure on
@@ -577,7 +664,7 @@ extension DatabaseTreeOutlineCoordinator: NSOutlineViewDelegate {
     /// tab is already that table. Publishing here would hand the same table to the window's
     /// navigation observer first and open it twice.
     func outlineViewSelectionDidChange(_ notification: Notification) {
-        guard !isSyncingSelection, !isReloading else { return }
+        guard !isSyncingSelection, !isReloading, !isCollapsingItem else { return }
         let nodes = selectedNodes()
         lastSelectedNodeIds = nodes.map(\.id)
         let refs = Set(DatabaseTreeSelection.tableRefs(of: nodes))

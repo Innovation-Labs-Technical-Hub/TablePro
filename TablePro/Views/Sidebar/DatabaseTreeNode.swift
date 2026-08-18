@@ -6,6 +6,22 @@
 import Foundation
 import TableProPluginKit
 
+/// Which groups a container shows. A group stands for objects the container holds, so the count is
+/// the whole rule: a capability flag says what a plugin declared, not what its driver returned, and
+/// a container with nothing in it answers with its own status row instead.
+internal enum DatabaseTreeObjectGroupResolver {
+    internal static func groups(
+        database: String,
+        schema: String?,
+        itemCounts: [SidebarObjectKind: Int]
+    ) -> [DatabaseTreeObjectGroup] {
+        SidebarObjectKind.allCases.compactMap { kind in
+            guard itemCounts[kind, default: 0] > 0 else { return nil }
+            return DatabaseTreeObjectGroup(database: database, schema: schema, kind: kind)
+        }
+    }
+}
+
 final class DatabaseTreeNode: SidebarOutlineNode {
     enum Status: Equatable {
         case loading
@@ -26,6 +42,7 @@ final class DatabaseTreeNode: SidebarOutlineNode {
 
         /// Flat shape: one collapsible section per object kind.
         case objectKindSection(SidebarObjectKind)
+        case containerObjectKindSection(DatabaseTreeObjectGroup)
         /// Hierarchical shape: a schema with no database above it.
         case hierarchicalSchemaSection(schema: String)
         /// Flat shape, Redis only.
@@ -44,7 +61,8 @@ final class DatabaseTreeNode: SidebarOutlineNode {
     var isExpandable: Bool {
         switch kind {
         case .recentSection, .database, .schema,
-             .objectKindSection, .hierarchicalSchemaSection, .redisKeysSection:
+             .objectKindSection, .containerObjectKindSection,
+             .hierarchicalSchemaSection, .redisKeysSection:
             return true
         case .table(let ref):
             return ref.table.type == .partitionedTable
@@ -76,7 +94,8 @@ final class DatabaseTreeNode: SidebarOutlineNode {
         switch kind {
         case .recentSection, .objectKindSection, .redisKeysSection:
             return true
-        case .database, .schema, .hierarchicalSchemaSection, .recentTable, .table,
+        case .database, .schema, .containerObjectKindSection,
+             .hierarchicalSchemaSection, .recentTable, .table,
              .routine, .status, .redisNode:
             return false
         }
@@ -87,7 +106,8 @@ final class DatabaseTreeNode: SidebarOutlineNode {
         case .database, .schema:
             return true
         case .recentSection, .recentTable, .table, .routine, .status,
-             .objectKindSection, .hierarchicalSchemaSection, .redisKeysSection, .redisNode:
+             .objectKindSection, .containerObjectKindSection,
+             .hierarchicalSchemaSection, .redisKeysSection, .redisNode:
             return false
         }
     }
@@ -99,7 +119,8 @@ final class DatabaseTreeNode: SidebarOutlineNode {
         case .schema(let database, let schema):
             return .schema(database: database, schema: schema, isSystem: systemSchemas.contains(schema))
         case .recentSection, .recentTable, .table, .routine, .status,
-             .objectKindSection, .hierarchicalSchemaSection, .redisKeysSection, .redisNode:
+             .objectKindSection, .containerObjectKindSection,
+             .hierarchicalSchemaSection, .redisKeysSection, .redisNode:
             return nil
         }
     }
@@ -120,6 +141,9 @@ final class DatabaseTreeNode: SidebarOutlineNode {
     }
 
     static func objectKindSectionId(_ kind: SidebarObjectKind) -> String { "kindSection\u{1}\(kind.rawValue)" }
+    static func containerObjectKindSectionId(_ group: DatabaseTreeObjectGroup) -> String {
+        "containerKindSection\u{1}\(group.database)\u{1}\(group.schema ?? "")\u{1}\(group.kind.rawValue)"
+    }
     static func hierarchicalSchemaSectionId(_ schema: String) -> String { "hschema\u{1}\(schema)" }
     static let redisKeysSectionId = "redis-keys-section"
     static func redisNodeId(_ node: RedisKeyNode) -> String { "redisnode\u{1}\(node.id)" }
